@@ -115,3 +115,41 @@ The key message is that conversation sits on top of prior editorial work; it is 
 - persisted narration cache and usage telemetry
 - richer geographic coverage
 - hands-free radio queue
+
+
+## Render deployment
+
+The repository includes a root-level `render.yaml` Blueprint for the current competition deployment.
+
+Current Blueprint:
+
+- one Node.js web service named `absurdity`
+- Render free plan by default
+- Frankfurt region
+- Node.js pinned by `.node-version`
+- build: `npm install && npm run build`
+- start: `npm start`
+- health check: `/api/health`
+- automatic deploys only after GitHub CI checks pass
+- `ABSURDITY_MODE=demo` by default so the public deployment is useful with zero provider credentials
+
+To create the service in Render:
+
+1. In Render, choose **New → Blueprint**.
+2. Connect the GitHub repository `noob-express3000/absurdity`.
+3. Select the `main` branch.
+4. Review the Blueprint and apply it.
+5. After the first successful deploy, use the generated `.onrender.com` URL.
+
+Optional provider secrets should be added in the Render service environment rather than committed:
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `ELEVENLABS_API_KEY`
+- `ELEVENLABS_VOICE_ID`
+- `EXA_API_KEY`
+- `TAVILY_API_KEY`
+
+The application remains functional in Demo Mode if every optional provider is missing.
+
+PostgreSQL and the once-daily research cron job are intentionally not provisioned yet because the current vertical slice does not depend on them. They should be added to the Blueprint when persistence and the scheduled deep-research command are implemented, rather than creating idle paid infrastructure prematurely.
