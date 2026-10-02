@@ -20,3 +20,22 @@ jobs:
         run: npm run typecheck
       - name: Production build
         run: npm run build
+      - name: Boot and smoke test
+        shell: bash
+        run: |
+          npm start > /tmp/absurdity-next.log 2>&1 &
+          APP_PID=$!
+          trap "kill $APP_PID || true" EXIT
+
+          for i in {1..20}; do
+            if curl --silent --fail http://127.0.0.1:3000 > /tmp/home.html; then
+              break
+            fi
+            sleep 1
+          done
+
+          grep -q "Absurdity read the news" /tmp/home.html
+
+          curl --silent --fail             -X POST http://127.0.0.1:3000/api/chat             -H "Content-Type: application/json"             -d '{"message":"Anything from Africa?"}'             > /tmp/chat.json
+
+          grep -q "South African fixture" /tmp/chat.json
