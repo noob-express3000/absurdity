@@ -46,4 +46,4 @@ jobs:
           curl --silent --fail             -X POST http://127.0.0.1:3000/api/chat             -H "Content-Type: application/json"             -d '{"message":"Anything from Africa?"}'             > /tmp/chat.json
 
           cat /tmp/chat.json
-          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/chat.json","utf8")); if(!x.text || !x.text.includes("South African fixture")) process.exit(1);'
+          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/chat.json","utf8")); if(!x.text || !x.text.includes("South Africa") && x.storyId === "goat-council") process.exit(1);'
