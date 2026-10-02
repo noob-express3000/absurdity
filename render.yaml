@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: absurdity
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: ABSURDITY_MODE
+        value: demo
