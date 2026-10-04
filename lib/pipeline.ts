@@ -165,8 +165,8 @@ export async function runDailyResearch() {
     rss: true,
     searchProvider: "none",
     searchQueries: 0,
-    openai: false,
-    openaiAnalyses: 0,
+    groq: false,
+    groqAnalyses: 0,
   };
 
   await recordResearchRun({
@@ -202,7 +202,7 @@ export async function runDailyResearch() {
     }
 
     const intelligence = new GroqIntelligenceProvider();
-    providerUsage.openai = intelligence.available();
+    providerUsage.groq = intelligence.available();
     const stories: Story[] = [];
 
     for (const group of groups) {
@@ -243,7 +243,7 @@ export async function runDailyResearch() {
       let analysis: CandidateAnalysis;
       if (intelligence.available()) {
         try {
-          providerUsage.openaiAnalyses += 1;
+          providerUsage.groqAnalyses += 1;
           analysis = await intelligence.analyzeCandidate({
             title: primary.title,
             snippet: primary.snippet,
