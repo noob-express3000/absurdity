@@ -4,7 +4,7 @@ import { runLightweightDiscovery } from "./research";
 import {
   type CandidateAnalysis,
   type CandidateEvidence,
-  OpenAIIntelligenceProvider,
+  GroqIntelligenceProvider,
 } from "./providers/intelligence";
 import { getSearchProvider } from "./providers/search";
 import { recordResearchRun, saveStories } from "./repository";
@@ -135,8 +135,8 @@ function deterministicAnalysis(
     confidence: multiSource ? "medium" : "low",
     seriousness: "mixed",
     verificationNotes: multiSource
-      ? "Multiple RSS publishers appear to report the same clustered event. OpenAI analysis was unavailable, so selection remains conservative."
-      : "Single-source RSS discovery only. OpenAI analysis was unavailable, so this candidate is retained for history but not promoted.",
+      ? "Multiple RSS publishers appear to report the same clustered event. Groq analysis was unavailable, so selection remains conservative."
+      : "Single-source RSS discovery only. Groq analysis was unavailable, so this candidate is retained for history but not promoted.",
     corroboratingUrls: rssEvidence.map((item) => item.url),
   };
 }
@@ -201,7 +201,7 @@ export async function runDailyResearch() {
       providerUsage.searchProvider = process.env.EXA_API_KEY ? "exa" : "tavily";
     }
 
-    const intelligence = new OpenAIIntelligenceProvider();
+    const intelligence = new GroqIntelligenceProvider();
     providerUsage.openai = intelligence.available();
     const stories: Story[] = [];
 
@@ -254,7 +254,7 @@ export async function runDailyResearch() {
           });
         } catch (error) {
           failures.push(
-            "OpenAI: " + (error instanceof Error ? error.message : "candidate analysis failed"),
+            "Groq: " + (error instanceof Error ? error.message : "candidate analysis failed"),
           );
           analysis = deterministicAnalysis(primary, rssEvidence);
         }
