@@ -15,7 +15,7 @@ export async function GET() {
       render: process.env.RENDER === "true",
       database,
       providers: {
-        openai: Boolean(process.env.OPENAI_API_KEY),
+        groq: Boolean(process.env.GROQ_API_KEY),
         elevenlabs: Boolean(
           process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID,
         ),
