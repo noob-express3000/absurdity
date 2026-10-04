@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { answerFromCorpus } from "@/lib/agent";
-import { OpenAIIntelligenceProvider } from "@/lib/providers/intelligence";
+import { GroqIntelligenceProvider } from "@/lib/providers/intelligence";
 import { storyRepository } from "@/lib/repository";
 
 export async function POST(request: Request) {
@@ -14,19 +14,19 @@ export async function POST(request: Request) {
     }
 
     const briefing = await storyRepository.getCurrentBriefing();
-    const provider = new OpenAIIntelligenceProvider();
+    const provider = new GroqIntelligenceProvider();
 
     if (provider.available()) {
       try {
         const text = await provider.converse(message, briefing.stories, storyId);
         return NextResponse.json({
           text,
-          intent: "openai-grounded",
-          provider: "openai",
+          intent: "groq-grounded",
+          provider: "groq",
           storyId,
         });
       } catch (error) {
-        console.warn("OpenAI conversation failed; using deterministic corpus agent.", error);
+        console.warn("Groq conversation failed; using deterministic corpus agent.", error);
       }
     }
 
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       text:
         briefing.stories.length > 0
-          ? "The live briefing is available, but the deterministic demo agent is intentionally disabled for live claims. Configure OpenAI for grounded conversation."
+          ? "The live briefing is available, but the deterministic demo agent is intentionally disabled for live claims. Configure Groq for grounded conversation."
           : "No verified live stories are available in the current briefing yet.",
       provider: "safe-fallback",
       intent: "live-fallback",
