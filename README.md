@@ -61,7 +61,7 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - permanent story/source/research-run archive
 - scheduled deep-research pipeline
 - source-aware clustering and deduplication
-- OpenAI shortlist analysis with Exa/Tavily as optional corroboration providers
+- Groq shortlist analysis with Exa/Tavily as optional corroboration providers
 - live archive API wired into the reader
 
 ## Hands-free commands
@@ -87,14 +87,14 @@ The live system now has a real persisted pipeline:
 
 `DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
 
-`/api/research` remains the cheap RSS preview endpoint. The heavier scheduled pipeline lives in `lib/pipeline.ts` and runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; OpenAI is used only after deterministic filtering and clustering.
+`/api/research` remains the cheap RSS preview endpoint. The heavier scheduled pipeline lives in `lib/pipeline.ts` and runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; Groq is used only after deterministic filtering and clustering.
 
 ## Optional providers
 
 The prototype can run without provider credentials. Optional environment variables are:
 
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
+- `GROQ_API_KEY`
+- `GROQ_MODEL`
 - `ELEVENLABS_API_KEY`
 - `ELEVENLABS_VOICE_ID`
 - `EXA_API_KEY`
@@ -130,7 +130,7 @@ npm run build
 - `lib/demo-data.ts` — seeded demonstration corpus
 - `lib/research.ts` — RSS collection and deterministic triage
 - `lib/agent.ts` — deterministic corpus agent
-- `lib/providers/intelligence.ts` — optional OpenAI provider
+- `lib/providers/intelligence.ts` — optional Groq provider
 - `lib/providers/search.ts` — optional Exa / Tavily provider
 - `lib/providers/voice.ts` — optional ElevenLabs provider
 
@@ -166,7 +166,7 @@ The backend now implements the production data seam discussed for Absurdity:
 - Automatic schema initialization plus `db/migrations/001_init.sql` for explicit PostgreSQL provisioning.
 - Permanent story/source/research-run records.
 - `/api/stories` for the current 48-hour briefing or searchable selected-story history.
-- A daily pipeline that clusters RSS candidates, optionally calls Exa/Tavily for corroboration, uses OpenAI only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
+- A daily pipeline that clusters RSS candidates, optionally calls Exa/Tavily for corroboration, uses Groq only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
 - Provider usage and failures are recorded per research run.
 
 Run the deep pipeline manually with:
@@ -175,7 +175,7 @@ Run the deep pipeline manually with:
 npm run research:daily
 ```
 
-For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `DATABASE_URL` as a repository secret. OpenAI and Exa/Tavily remain optional secrets, but OpenAI is required for the full editorial verification/classification layer.
+For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `DATABASE_URL` as a repository secret. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
 
 Render remains the web host. The web service can point at any PostgreSQL connection string, including a free external PostgreSQL provider. Absurdity deliberately does not provision a paid Render database or cron job by default.
 
