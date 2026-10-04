@@ -57,7 +57,7 @@ function extractResponseText(payload: any): string | null {
 function extractJson(text: string) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("OpenAI returned no JSON object.");
+  if (start < 0 || end <= start) throw new Error("Groq returned no JSON object.");
   return JSON.parse(text.slice(start, end + 1));
 }
 
