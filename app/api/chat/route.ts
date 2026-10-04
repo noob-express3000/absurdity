@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { answerFromCorpus } from "@/lib/agent";
-import { demoBriefing } from "@/lib/demo-data";
 import { OpenAIIntelligenceProvider } from "@/lib/providers/intelligence";
+import { storyRepository } from "@/lib/repository";
 
 export async function POST(request: Request) {
   try {
@@ -13,11 +13,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
+    const briefing = await storyRepository.getCurrentBriefing();
     const provider = new OpenAIIntelligenceProvider();
 
     if (provider.available()) {
       try {
-        const text = await provider.converse(message, demoBriefing.stories, storyId);
+        const text = await provider.converse(message, briefing.stories, storyId);
         return NextResponse.json({
           text,
           intent: "openai-grounded",
@@ -29,9 +30,21 @@ export async function POST(request: Request) {
       }
     }
 
+    if (briefing.mode === "demo") {
+      return NextResponse.json({
+        ...answerFromCorpus(message, storyId),
+        provider: "deterministic",
+      });
+    }
+
     return NextResponse.json({
-      ...answerFromCorpus(message, storyId),
-      provider: "deterministic",
+      text:
+        briefing.stories.length > 0
+          ? "The live briefing is available, but the deterministic demo agent is intentionally disabled for live claims. Configure OpenAI for grounded conversation."
+          : "No verified live stories are available in the current briefing yet.",
+      provider: "safe-fallback",
+      intent: "live-fallback",
+      storyId,
     });
   } catch (error) {
     console.error("Conversation route failed.", error);

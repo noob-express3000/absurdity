@@ -5,7 +5,7 @@ export type StorySource = {
   publisher: string;
   url: string;
   publishedAt: string;
-  sourceType: "primary" | "local" | "national" | "institutional" | "demo-fixture";
+  sourceType: "primary" | "local" | "national" | "institutional" | "search" | "demo-fixture";
 };
 
 export type ResearchStep = {

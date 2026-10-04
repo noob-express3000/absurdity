@@ -155,3 +155,28 @@ Provider secrets belong in the Render service environment and should never be co
 6. persisted narration cache;
 7. richer geographic coverage;
 8. offline-friendly reading cache.
+
+
+## Persistence and scheduled research
+
+The backend now implements the production data seam discussed for Absurdity:
+
+- PostgreSQL when `DATABASE_URL` is configured.
+- Built-in SQLite fallback for local development when `DATABASE_URL` is absent.
+- Automatic schema initialization plus `db/migrations/001_init.sql` for explicit PostgreSQL provisioning.
+- Permanent story/source/research-run records.
+- `/api/stories` for the current 48-hour briefing or searchable selected-story history.
+- A daily pipeline that clusters RSS candidates, optionally calls Exa/Tavily for corroboration, uses OpenAI only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
+- Provider usage and failures are recorded per research run.
+
+Run the deep pipeline manually with:
+
+```bash
+npm run research:daily
+```
+
+For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `DATABASE_URL` as a repository secret. OpenAI and Exa/Tavily remain optional secrets, but OpenAI is required for the full editorial verification/classification layer.
+
+Render remains the web host. The web service can point at any PostgreSQL connection string, including a free external PostgreSQL provider. Absurdity deliberately does not provision a paid Render database or cron job by default.
+
+To switch the deployed reader to persisted live data, set `ABSURDITY_MODE=live` on the web service after the database and scheduled pipeline are configured.

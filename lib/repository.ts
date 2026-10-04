@@ -1,10 +1,109 @@
+import { randomUUID } from "node:crypto";
+import { getDatabase } from "./database";
 import { demoBriefing } from "./demo-data";
-import type { Briefing, Story } from "./types";
+import type { Briefing, ResearchStep, Story, StorySource } from "./types";
 
 export interface StoryRepository {
   getCurrentBriefing(): Promise<Briefing>;
   getStory(id: string): Promise<Story | null>;
-  searchStories(query: string): Promise<Story[]>;
+  searchStories(query: string, limit?: number): Promise<Story[]>;
+}
+
+export type ResearchRunRecord = {
+  id?: string;
+  startedAt: string;
+  completedAt?: string;
+  windowStart: string;
+  windowEnd: string;
+  status: "running" | "complete" | "failed";
+  scanned: number;
+  candidates: number;
+  selected: number;
+  failures: string[];
+  providerUsage: Record<string, number | string | boolean>;
+};
+
+type StoryRow = {
+  id: string;
+  cluster_id: string;
+  rank: number;
+  title: string;
+  short_title: string;
+  summary: string;
+  detailed_summary: string;
+  why_weird: string;
+  category: string;
+  tags_json: string;
+  country: string;
+  region: string;
+  event_date: string;
+  publication_date: string;
+  discovered_at: string;
+  absurdity_score: number;
+  novelty_score: number;
+  humor_score: number;
+  seriousness_score: number;
+  credibility_score: number;
+  confidence: Story["confidence"];
+  seriousness: Story["seriousness"];
+  verification_notes: string;
+  status: Story["status"];
+  is_fixture: number;
+};
+
+type SourceRow = {
+  publisher: string;
+  url: string;
+  published_at: string;
+  source_type: StorySource["sourceType"];
+};
+
+type StepRow = {
+  label: string;
+  detail: string;
+  status: ResearchStep["status"];
+  at_value: string;
+};
+
+function safeTags(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((tag) => typeof tag === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rowToStory(row: StoryRow, sources: StorySource[], research: ResearchStep[]): Story {
+  return {
+    id: row.id,
+    rank: Number(row.rank),
+    title: row.title,
+    shortTitle: row.short_title,
+    summary: row.summary,
+    detailedSummary: row.detailed_summary,
+    whyItsWeird: row.why_weird,
+    category: row.category,
+    tags: safeTags(row.tags_json),
+    country: row.country,
+    region: row.region,
+    eventDate: row.event_date,
+    publicationDate: row.publication_date,
+    discoveredAt: row.discovered_at,
+    absurdityScore: Number(row.absurdity_score),
+    noveltyScore: Number(row.novelty_score),
+    humorScore: Number(row.humor_score),
+    seriousnessScore: Number(row.seriousness_score),
+    credibilityScore: Number(row.credibility_score),
+    confidence: row.confidence,
+    seriousness: row.seriousness,
+    clusterId: row.cluster_id,
+    sources,
+    verificationNotes: row.verification_notes,
+    status: row.status,
+    research,
+    isFixture: Boolean(Number(row.is_fixture)),
+  };
 }
 
 export class DemoStoryRepository implements StoryRepository {
@@ -16,24 +115,273 @@ export class DemoStoryRepository implements StoryRepository {
     return demoBriefing.stories.find((story) => story.id === id) ?? null;
   }
 
-  async searchStories(query: string) {
+  async searchStories(query: string, limit = 200) {
     const needle = query.trim().toLowerCase();
-    if (!needle) return demoBriefing.stories;
+    const matches = needle
+      ? demoBriefing.stories.filter((story) =>
+          [
+            story.title,
+            story.summary,
+            story.category,
+            story.country,
+            story.region,
+            story.tags.join(" "),
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(needle),
+        )
+      : demoBriefing.stories;
 
-    return demoBriefing.stories.filter((story) =>
-      [
-        story.title,
-        story.summary,
-        story.category,
-        story.country,
-        story.region,
-        story.tags.join(" "),
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
-    );
+    return matches.slice(0, limit);
   }
 }
 
-export const storyRepository: StoryRepository = new DemoStoryRepository();
+export class PersistentStoryRepository implements StoryRepository {
+  private async hydrate(row: StoryRow) {
+    const database = await getDatabase();
+
+    const [sourceRows, stepRows] = await Promise.all([
+      database.query<SourceRow>(
+        "SELECT publisher, url, published_at, source_type FROM story_sources WHERE story_id = ? ORDER BY published_at ASC",
+        [row.id],
+      ),
+      database.query<StepRow>(
+        "SELECT label, detail, status, at_value FROM research_steps WHERE story_id = ? ORDER BY ordinal ASC",
+        [row.id],
+      ),
+    ]);
+
+    const sources: StorySource[] = sourceRows.map((source) => ({
+      publisher: source.publisher,
+      url: source.url,
+      publishedAt: source.published_at,
+      sourceType: source.source_type,
+    }));
+
+    const research: ResearchStep[] = stepRows.map((step) => ({
+      label: step.label,
+      detail: step.detail,
+      status: step.status,
+      at: step.at_value,
+    }));
+
+    return rowToStory(row, sources, research);
+  }
+
+  async getCurrentBriefing(): Promise<Briefing> {
+    const database = await getDatabase();
+    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const rows = await database.query<StoryRow>(
+      "SELECT * FROM stories WHERE status = ? AND publication_date >= ? ORDER BY rank ASC, absurdity_score DESC, publication_date DESC LIMIT ?",
+      ["selected", cutoff, 100],
+    );
+
+    const stories = await Promise.all(rows.map((row) => this.hydrate(row)));
+    const latestRun = await getLatestResearchRun();
+
+    return {
+      id: "live-" + new Date().toISOString().slice(0, 10),
+      label: "Live Absurdity briefing",
+      mode: "live",
+      generatedAt: latestRun?.completed_at || new Date().toISOString(),
+      window: "Most recent 48 hours",
+      stats: {
+        scanned: Number(latestRun?.scanned || 0),
+        unusual: Number(latestRun?.candidates || 0),
+        verified: stories.filter((story) => story.confidence !== "low").length,
+        selected: stories.length,
+        countries: new Set(stories.map((story) => story.country)).size,
+      },
+      stories,
+    };
+  }
+
+  async getStory(id: string) {
+    const database = await getDatabase();
+    const rows = await database.query<StoryRow>("SELECT * FROM stories WHERE id = ? LIMIT 1", [id]);
+    return rows[0] ? this.hydrate(rows[0]) : null;
+  }
+
+  async searchStories(query: string, limit = 200) {
+    const database = await getDatabase();
+    const needle = "%" + query.trim().toLowerCase() + "%";
+    const safeLimit = Math.max(1, Math.min(limit, 500));
+
+    const rows = query.trim()
+      ? await database.query<StoryRow>(
+          `SELECT * FROM stories
+           WHERE status = 'selected'
+             AND (
+               LOWER(title) LIKE ?
+               OR LOWER(summary) LIKE ?
+               OR LOWER(category) LIKE ?
+               OR LOWER(country) LIKE ?
+               OR LOWER(region) LIKE ?
+               OR LOWER(tags_json) LIKE ?
+             )
+           ORDER BY publication_date DESC, rank ASC
+           LIMIT ?`,
+          [needle, needle, needle, needle, needle, needle, safeLimit],
+        )
+      : await database.query<StoryRow>(
+          "SELECT * FROM stories WHERE status = ? ORDER BY publication_date DESC, rank ASC LIMIT ?",
+          ["selected", safeLimit],
+        );
+
+    return Promise.all(rows.map((row) => this.hydrate(row)));
+  }
+
+  async upsertStory(story: Story) {
+    const database = await getDatabase();
+    const now = new Date().toISOString();
+
+    await database.execute(
+      `INSERT INTO stories (
+        id, cluster_id, rank, title, short_title, summary, detailed_summary, why_weird,
+        category, tags_json, country, region, event_date, publication_date, discovered_at,
+        absurdity_score, novelty_score, humor_score, seriousness_score, credibility_score,
+        confidence, seriousness, verification_notes, status, is_fixture, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        cluster_id = excluded.cluster_id,
+        rank = excluded.rank,
+        title = excluded.title,
+        short_title = excluded.short_title,
+        summary = excluded.summary,
+        detailed_summary = excluded.detailed_summary,
+        why_weird = excluded.why_weird,
+        category = excluded.category,
+        tags_json = excluded.tags_json,
+        country = excluded.country,
+        region = excluded.region,
+        event_date = excluded.event_date,
+        publication_date = excluded.publication_date,
+        discovered_at = excluded.discovered_at,
+        absurdity_score = excluded.absurdity_score,
+        novelty_score = excluded.novelty_score,
+        humor_score = excluded.humor_score,
+        seriousness_score = excluded.seriousness_score,
+        credibility_score = excluded.credibility_score,
+        confidence = excluded.confidence,
+        seriousness = excluded.seriousness,
+        verification_notes = excluded.verification_notes,
+        status = excluded.status,
+        is_fixture = excluded.is_fixture,
+        updated_at = excluded.updated_at`,
+      [
+        story.id,
+        story.clusterId,
+        story.rank,
+        story.title,
+        story.shortTitle,
+        story.summary,
+        story.detailedSummary,
+        story.whyItsWeird,
+        story.category,
+        JSON.stringify(story.tags),
+        story.country,
+        story.region,
+        story.eventDate,
+        story.publicationDate,
+        story.discoveredAt,
+        story.absurdityScore,
+        story.noveltyScore,
+        story.humorScore,
+        story.seriousnessScore,
+        story.credibilityScore,
+        story.confidence,
+        story.seriousness,
+        story.verificationNotes,
+        story.status,
+        story.isFixture ? 1 : 0,
+        now,
+        now,
+      ],
+    );
+
+    await database.execute("DELETE FROM story_sources WHERE story_id = ?", [story.id]);
+    for (const source of story.sources) {
+      await database.execute(
+        "INSERT INTO story_sources (story_id, publisher, url, published_at, source_type) VALUES (?, ?, ?, ?, ?)",
+        [story.id, source.publisher, source.url, source.publishedAt, source.sourceType],
+      );
+    }
+
+    await database.execute("DELETE FROM research_steps WHERE story_id = ?", [story.id]);
+    for (const [index, step] of story.research.entries()) {
+      await database.execute(
+        "INSERT INTO research_steps (story_id, ordinal, label, detail, status, at_value) VALUES (?, ?, ?, ?, ?, ?)",
+        [story.id, index, step.label, step.detail, step.status, step.at],
+      );
+    }
+  }
+}
+
+export async function saveStories(stories: Story[]) {
+  const repository = new PersistentStoryRepository();
+  for (const story of stories) {
+    await repository.upsertStory(story);
+  }
+}
+
+export async function recordResearchRun(run: ResearchRunRecord) {
+  const database = await getDatabase();
+  const id = run.id || randomUUID();
+  const createdAt = new Date().toISOString();
+
+  await database.execute(
+    `INSERT INTO research_runs (
+      id, started_at, completed_at, window_start, window_end, status,
+      scanned, candidates, selected, failures_json, provider_usage_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      completed_at = excluded.completed_at,
+      status = excluded.status,
+      scanned = excluded.scanned,
+      candidates = excluded.candidates,
+      selected = excluded.selected,
+      failures_json = excluded.failures_json,
+      provider_usage_json = excluded.provider_usage_json`,
+    [
+      id,
+      run.startedAt,
+      run.completedAt || null,
+      run.windowStart,
+      run.windowEnd,
+      run.status,
+      run.scanned,
+      run.candidates,
+      run.selected,
+      JSON.stringify(run.failures),
+      JSON.stringify(run.providerUsage),
+      createdAt,
+    ],
+  );
+
+  return id;
+}
+
+export async function getLatestResearchRun() {
+  const database = await getDatabase();
+  const rows = await database.query<{
+    id: string;
+    started_at: string;
+    completed_at: string | null;
+    window_start: string;
+    window_end: string;
+    status: string;
+    scanned: number;
+    candidates: number;
+    selected: number;
+    failures_json: string;
+    provider_usage_json: string;
+  }>("SELECT * FROM research_runs ORDER BY started_at DESC LIMIT 1");
+
+  return rows[0] || null;
+}
+
+export const storyRepository: StoryRepository =
+  process.env.ABSURDITY_MODE === "live"
+    ? new PersistentStoryRepository()
+    : new DemoStoryRepository();

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { databaseStatus } from "@/lib/database";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const database = await databaseStatus();
+
   return NextResponse.json(
     {
       status: "ok",
@@ -10,6 +13,7 @@ export async function GET() {
       mode: process.env.ABSURDITY_MODE || "demo",
       runtime: "node",
       render: process.env.RENDER === "true",
+      database,
       providers: {
         openai: Boolean(process.env.OPENAI_API_KEY),
         elevenlabs: Boolean(
@@ -17,6 +21,10 @@ export async function GET() {
         ),
         exa: Boolean(process.env.EXA_API_KEY),
         tavily: Boolean(process.env.TAVILY_API_KEY),
+      },
+      research: {
+        windowHours: Number(process.env.RESEARCH_WINDOW_HOURS || 30),
+        maxCandidates: Number(process.env.RESEARCH_MAX_CANDIDATES || 12),
       },
     },
     {
