@@ -70,10 +70,10 @@ function stringValue(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
-export class OpenAIIntelligenceProvider implements IntelligenceProvider {
+export class GroqIntelligenceProvider implements IntelligenceProvider {
   constructor(
-    private apiKey = process.env.OPENAI_API_KEY,
-    private model = process.env.OPENAI_MODEL || "gpt-5-mini",
+    private apiKey = process.env.GROQ_API_KEY,
+    private model = process.env.GROQ_MODEL || "openai/gpt-oss-120b",
   ) {}
 
   available() {
@@ -81,9 +81,9 @@ export class OpenAIIntelligenceProvider implements IntelligenceProvider {
   }
 
   private async respond(input: string, maxOutputTokens: number) {
-    if (!this.apiKey) throw new Error("OpenAI is not configured.");
+    if (!this.apiKey) throw new Error("Groq is not configured.");
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("https://api.groq.com/openai/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -97,12 +97,12 @@ export class OpenAIIntelligenceProvider implements IntelligenceProvider {
     });
 
     if (!response.ok) {
-      throw new Error("OpenAI request failed with status " + response.status);
+      throw new Error("Groq request failed with status " + response.status);
     }
 
     const payload = await response.json();
     const text = extractResponseText(payload);
-    if (!text) throw new Error("OpenAI returned no text.");
+    if (!text) throw new Error("Groq returned no text.");
     return text.trim();
   }
 
