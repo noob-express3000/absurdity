@@ -61,9 +61,12 @@ function demoClock() {
 }
 
 export default function Home() {
-  const stories = demoBriefing.stories;
+  const [remoteStories, setRemoteStories] = useState<Story[] | null>(null);
+  const [dataMode, setDataMode] = useState<"demo" | "live">("demo");
+  const stories = remoteStories?.length ? remoteStories : demoBriefing.stories;
+  const usingLive = dataMode === "live" && Boolean(remoteStories?.length);
   const [tab, setTab] = useState<Tab>("home");
-  const [selectedId, setSelectedId] = useState(stories[0].id);
+  const [selectedId, setSelectedId] = useState(demoBriefing.stories[0].id);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -73,7 +76,7 @@ export default function Home() {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [listening, setListening] = useState(false);
   const [voiceHint, setVoiceHint] = useState("Say “next”, “favorite”, “dismiss”, “read”, “history” or “home”.");
-  const anchorTime = useMemo(demoClock, []);
+  const anchorTime = useMemo(() => (usingLive ? Date.now() : demoClock()), [usingLive]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const keepListeningRef = useRef(false);
@@ -83,6 +86,37 @@ export default function Home() {
     setFavorites(parseStoredIds(FAVORITES_KEY));
     setDismissed(parseStoredIds(DISMISSED_KEY));
     setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch("/api/stories?scope=history&limit=500", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Story archive request failed.");
+        return response.json();
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        const mode = payload?.mode === "live" ? "live" : "demo";
+        setDataMode(mode);
+
+        if (mode === "live" && Array.isArray(payload?.stories) && payload.stories.length) {
+          setRemoteStories(payload.stories as Story[]);
+          setSelectedId((current) =>
+            payload.stories.some((story: Story) => story.id === current)
+              ? current
+              : payload.stories[0].id,
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setDataMode("demo");
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -378,7 +412,7 @@ export default function Home() {
 
           <div className="flex items-center gap-2">
             <span className="rounded-full border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs font-bold">
-              DEMO
+              {usingLive ? "LIVE" : dataMode === "live" ? "DEMO FALLBACK" : "DEMO"}
             </span>
           </div>
         </header>
@@ -653,9 +687,11 @@ export default function Home() {
 
         <footer className="mt-3 flex flex-col gap-1 px-1 text-xs text-[var(--muted)] md:flex-row md:items-center md:justify-between">
           <span>
-            {demoBriefing.mode === "demo"
-              ? "Demo clock follows the newest fixture so the 48-hour feed remains testable."
-              : "Home only shows stories published in the last 48 hours."}
+            {usingLive
+              ? "Live archive loaded. Home only shows stories published in the last 48 hours."
+              : dataMode === "live"
+                ? "Live mode has no promoted stories yet, so the clearly labeled demo corpus remains visible."
+                : "Demo clock follows the newest fixture so the 48-hour feed remains testable."}
           </span>
           <span>{voiceHint}</span>
         </footer>
