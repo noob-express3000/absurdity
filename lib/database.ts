@@ -1,9 +1,9 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Pool } from "pg";
+import { createClient } from "@tursodatabase/serverless/compat";
 
-export type DatabaseKind = "postgres" | "sqlite";
+export type DatabaseKind = "turso" | "sqlite";
 
 export interface SqlDatabase {
   kind: DatabaseKind;
@@ -87,30 +87,28 @@ const schemaStatements = [
   "CREATE INDEX IF NOT EXISTS idx_runs_started_at ON research_runs(started_at)",
 ];
 
-function postgresSql(sql: string) {
-  let index = 0;
-  return sql.replace(/\?/g, () => "$" + ++index);
-}
+class TursoDatabase implements SqlDatabase {
+  kind: DatabaseKind = "turso";
+  private client: ReturnType<typeof createClient>;
 
-class PostgresDatabase implements SqlDatabase {
-  kind: DatabaseKind = "postgres";
-  private pool: Pool;
-
-  constructor(connectionString: string) {
-    this.pool = new Pool({
-      connectionString,
-      max: Number(process.env.DATABASE_POOL_SIZE || 4),
-    });
+  constructor(url: string, authToken: string) {
+    this.client = createClient({ url, authToken });
   }
 
   async query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []) {
-    const result = await this.pool.query(postgresSql(sql), params);
-    return result.rows as T[];
+    const result = await this.client.execute({
+      sql,
+      args: params as any[],
+    });
+    return result.rows as unknown as T[];
   }
 
   async execute(sql: string, params: unknown[] = []) {
-    const result = await this.pool.query(postgresSql(sql), params);
-    return result.rowCount ?? 0;
+    const result = await this.client.execute({
+      sql,
+      args: params as any[],
+    });
+    return Number(result.rowsAffected);
   }
 }
 
@@ -151,6 +149,7 @@ let initialized = false;
 async function initialize(database: SqlDatabase) {
   if (initialized) return database;
 
+  await database.execute("PRAGMA foreign_keys = ON");
   for (const statement of schemaStatements) {
     await database.execute(statement);
   }
@@ -162,14 +161,21 @@ async function initialize(database: SqlDatabase) {
 export function getDatabase() {
   if (!databasePromise) {
     databasePromise = (async () => {
-      const connectionString = process.env.DATABASE_URL?.trim();
-      const database = connectionString
-        ? new PostgresDatabase(connectionString)
-        : await SqliteDatabase.open(
-            process.env.ABSURDITY_SQLITE_PATH?.trim() || ".data/absurdity.db",
-          );
+      const tursoUrl = process.env.TURSO_DATABASE_URL?.trim();
+      const tursoToken = process.env.TURSO_AUTH_TOKEN?.trim();
 
-      return initialize(database);
+      if (tursoUrl) {
+        if (!tursoToken) {
+          throw new Error("TURSO_AUTH_TOKEN is required when TURSO_DATABASE_URL is configured.");
+        }
+        return initialize(new TursoDatabase(tursoUrl, tursoToken));
+      }
+
+      return initialize(
+        await SqliteDatabase.open(
+          process.env.ABSURDITY_SQLITE_PATH?.trim() || ".data/absurdity.db",
+        ),
+      );
     })();
   }
 
@@ -184,7 +190,7 @@ export async function databaseStatus() {
   } catch (error) {
     return {
       ready: false,
-      kind: process.env.DATABASE_URL ? "postgres" : "sqlite",
+      kind: process.env.TURSO_DATABASE_URL ? "turso" : "sqlite",
       error: error instanceof Error ? error.message : "Database unavailable",
     };
   }

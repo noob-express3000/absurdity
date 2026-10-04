@@ -14,7 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
       EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
@@ -34,10 +35,10 @@ jobs:
       - name: Install
         run: npm install
 
-      - name: Require persistent database
+      - name: Require Turso credentials
         run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "DATABASE_URL secret is required for scheduled research."
+          if [ -z "$TURSO_DATABASE_URL" ] || [ -z "$TURSO_AUTH_TOKEN" ]; then
+            echo "TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are required for scheduled research."
             exit 1
           fi
 

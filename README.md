@@ -57,7 +57,7 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - ElevenLabs narration route with browser speech fallback
 - optional browser speech-recognition commands for hands-free navigation
 - lightweight RSS discovery endpoint
-- PostgreSQL production persistence with SQLite local fallback
+- Turso Cloud production persistence with SQLite local fallback
 - permanent story/source/research-run archive
 - scheduled deep-research pipeline
 - source-aware clustering and deduplication
@@ -163,7 +163,7 @@ The backend now implements the production data seam discussed for Absurdity:
 
 - PostgreSQL when `DATABASE_URL` is configured.
 - Built-in SQLite fallback for local development when `DATABASE_URL` is absent.
-- Automatic schema initialization plus `db/migrations/001_init.sql` for explicit PostgreSQL provisioning.
+- Automatic SQLite/libSQL schema initialization plus `db/migrations/001_init.sql` as the canonical schema.
 - Permanent story/source/research-run records.
 - `/api/stories` for the current 48-hour briefing or searchable selected-story history.
 - A daily pipeline that clusters RSS candidates, optionally calls Exa/Tavily for corroboration, uses Groq only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
@@ -175,8 +175,8 @@ Run the deep pipeline manually with:
 npm run research:daily
 ```
 
-For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `DATABASE_URL` as a repository secret. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
+For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as repository secrets. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
 
-Render remains the web host. The web service can point at any PostgreSQL connection string, including a free external PostgreSQL provider. Absurdity deliberately does not provision a paid Render database or cron job by default.
+Render remains the web host while Turso owns the persistent archive. Both Render and the GitHub Actions research job use the same Turso database, so the free Render filesystem is never treated as durable storage.
 
-To switch the deployed reader to persisted live data, set `ABSURDITY_MODE=live` on the web service after the database and scheduled pipeline are configured.
+The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Groq secrets during deployment.
