@@ -68,6 +68,7 @@ export default function Home() {
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [historyRange, setHistoryRange] = useState<HistoryRange>("all");
+  const [historyDate, setHistoryDate] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [listening, setListening] = useState(false);
@@ -117,11 +118,22 @@ export default function Home() {
   );
 
   const historyStories = useMemo(() => {
-    if (historyRange === "all") return stories;
-    const days = historyRange === "2d" ? 2 : historyRange === "7d" ? 7 : 30;
-    const cutoff = anchorTime - days * 24 * 60 * 60 * 1000;
-    return stories.filter((story) => new Date(story.publicationDate).getTime() >= cutoff);
-  }, [anchorTime, historyRange, stories]);
+    let filtered = stories;
+
+    if (historyRange !== "all") {
+      const days = historyRange === "2d" ? 2 : historyRange === "7d" ? 7 : 30;
+      const cutoff = anchorTime - days * 24 * 60 * 60 * 1000;
+      filtered = filtered.filter((story) => new Date(story.publicationDate).getTime() >= cutoff);
+    }
+
+    if (historyDate) {
+      filtered = filtered.filter(
+        (story) => new Date(story.publicationDate).toISOString().slice(0, 10) === historyDate,
+      );
+    }
+
+    return filtered;
+  }, [anchorTime, historyDate, historyRange, stories]);
 
   const baseStories =
     tab === "home" ? homeStories : tab === "favorites" ? favoriteStories : historyStories;
@@ -368,18 +380,6 @@ export default function Home() {
             <span className="rounded-full border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs font-bold">
               DEMO
             </span>
-            <button
-              onClick={listening ? stopHandsFree : startHandsFree}
-              className={
-                "rounded-full px-3 py-2 text-xs font-bold transition " +
-                (listening
-                  ? "bg-[var(--accent)] text-white"
-                  : "border border-[var(--line)] bg-[var(--paper)]")
-              }
-              title={voiceHint}
-            >
-              {listening ? "Listening…" : "Hands-free"}
-            </button>
           </div>
         </header>
 
@@ -401,16 +401,25 @@ export default function Home() {
               />
             )}
             {tab === "history" && (
-              <select
-                value={historyRange}
-                onChange={(event) => setHistoryRange(event.target.value as HistoryRange)}
-                className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold outline-none"
-              >
-                <option value="2d">Last 2 days</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="all">All history</option>
-              </select>
+              <>
+                <input
+                  type="date"
+                  value={historyDate}
+                  onChange={(event) => setHistoryDate(event.target.value)}
+                  className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold outline-none"
+                  aria-label="Filter history by exact publication date"
+                />
+                <select
+                  value={historyRange}
+                  onChange={(event) => setHistoryRange(event.target.value as HistoryRange)}
+                  className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold outline-none"
+                >
+                  <option value="2d">Last 2 days</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                  <option value="all">All history</option>
+                </select>
+              </>
             )}
             {tab === "home" && dismissed.length > 0 && (
               <button
@@ -616,16 +625,28 @@ export default function Home() {
                 )}
               </div>
 
-              <button
-                onClick={narrate}
-                className="rounded-xl bg-[var(--ink)] px-5 py-3 text-sm font-black text-white"
-              >
-                {voiceState === "loading"
-                  ? "Preparing…"
-                  : voiceState === "playing"
-                    ? "■ Stop"
-                    : "◉ Speak"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={narrate}
+                  className="rounded-xl border border-[var(--line)] px-4 py-3 text-sm font-black"
+                >
+                  {voiceState === "loading"
+                    ? "Preparing…"
+                    : voiceState === "playing"
+                      ? "■ Stop reading"
+                      : "▶ Read aloud"}
+                </button>
+                <button
+                  onClick={listening ? stopHandsFree : startHandsFree}
+                  className={
+                    "rounded-xl px-5 py-3 text-sm font-black text-white " +
+                    (listening ? "bg-[var(--accent)]" : "bg-[var(--ink)]")
+                  }
+                  title={voiceHint}
+                >
+                  {listening ? "● Listening…" : "◉ Talk to Absurdity"}
+                </button>
+              </div>
             </div>
           </article>
         </section>
