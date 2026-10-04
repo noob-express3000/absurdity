@@ -57,7 +57,12 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - ElevenLabs narration route with browser speech fallback
 - optional browser speech-recognition commands for hands-free navigation
 - lightweight RSS discovery endpoint
-- OpenAI, Exa and Tavily provider seams retained for the live research pipeline
+- PostgreSQL production persistence with SQLite local fallback
+- permanent story/source/research-run archive
+- scheduled deep-research pipeline
+- source-aware clustering and deduplication
+- OpenAI shortlist analysis with Exa/Tavily as optional corroboration providers
+- live archive API wired into the reader
 
 ## Hands-free commands
 
@@ -78,13 +83,11 @@ Narration works independently through ElevenLabs when configured and falls back 
 
 ## Live research pipeline
 
-The intended live system remains:
+The live system now has a real persisted pipeline:
 
-`DISCOVER → EXTRACT → NORMALIZE → DEDUPLICATE → FILTER → CLUSTER → VERIFY → CLASSIFY → SCORE → RANK → SUMMARIZE → STORE → PRESENT → NARRATE`
+`DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
 
-The current `/api/research` endpoint implements lightweight RSS discovery and deterministic triage. It does **not** pretend to be full verification.
-
-The next backend layer should move the story archive into a relational database and add a scheduled research job. The database should make properties such as `publicationDate`, `eventDate`, `country`, `region`, `category`, `tags`, `clusterId`, confidence and source records queryable rather than relying on a static fixture corpus.
+`/api/research` remains the cheap RSS preview endpoint. The heavier scheduled pipeline lives in `lib/pipeline.ts` and runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; OpenAI is used only after deterministic filtering and clustering.
 
 ## Optional providers
 
@@ -147,15 +150,12 @@ Provider secrets belong in the Render service environment and should never be co
 
 ## Next build layer
 
-1. relational persistence for stories, sources, favorites and archive metadata;
-2. scheduled collection at configurable intervals;
-3. model-assisted clustering and verification after cheap deterministic filtering;
-4. source-aware deduplication across publishers;
-5. live home-feed queries limited to the newest 48 hours;
-6. persisted narration cache;
-7. richer geographic coverage;
-8. offline-friendly reading cache.
-
+1. broaden RSS and geographic coverage;
+2. persisted narration cache;
+3. server-side pagination and richer history facets;
+4. authenticated cross-device favorites when user accounts are introduced;
+5. offline-friendly reading cache;
+6. deeper extraction for difficult source pages where RSS snippets are insufficient.
 
 ## Persistence and scheduled research
 
