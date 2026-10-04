@@ -10,4 +10,14 @@ services:
     autoDeployTrigger: checksPass
     envVars:
       - key: ABSURDITY_MODE
-        value: demo
+        value: live
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: DATABASE_URL
+        sync: false
+      - key: RESEARCH_WINDOW_HOURS
+        value: "30"
+      - key: RESEARCH_MAX_CANDIDATES
+        value: "12"
