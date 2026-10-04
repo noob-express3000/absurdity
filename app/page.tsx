@@ -1,106 +1,149 @@
 "use client";
 
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { demoBriefing } from "@/lib/demo-data";
 import type { Story } from "@/lib/types";
 
-type View = "briefing" | "research";
-type ChatMessage = { role: "agent" | "user"; text: string };
+type Tab = "home" | "favorites" | "history";
+type HistoryRange = "2d" | "7d" | "30d" | "all";
+type VoiceState = "idle" | "loading" | "playing";
 
-const promptChips = [
-  "Give me the weirdest one",
-  "Anything from Africa?",
-  "Animals only",
-  "Did this actually happen?",
-];
+const FAVORITES_KEY = "absurdity:favorites:v1";
+const DISMISSED_KEY = "absurdity:dismissed:v1";
+const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
-function formatDate(value: string) {
+function parseStoredIds(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function formatDate(value: string, includeTime = false) {
   try {
     return new Intl.DateTimeFormat("en", {
       day: "2-digit",
       month: "short",
       year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+      ...(includeTime ? { hour: "2-digit", minute: "2-digit" } : {}),
     }).format(new Date(value));
   } catch {
     return value;
   }
 }
 
-function confidenceLabel(story: Story) {
-  return story.confidence.charAt(0).toUpperCase() + story.confidence.slice(1) + " confidence";
+function storyMatches(story: Story, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+
+  return [
+    story.title,
+    story.shortTitle,
+    story.summary,
+    story.detailedSummary,
+    story.country,
+    story.region,
+    story.category,
+    story.tags.join(" "),
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(needle);
+}
+
+function demoClock() {
+  if (demoBriefing.mode !== "demo") return Date.now();
+  return Math.max(...demoBriefing.stories.map((story) => new Date(story.publicationDate).getTime()));
 }
 
 export default function Home() {
-  const [view, setView] = useState<View>("briefing");
-  const [selectedId, setSelectedId] = useState(demoBriefing.stories[0].id);
+  const stories = demoBriefing.stories;
+  const [tab, setTab] = useState<Tab>("home");
+  const [selectedId, setSelectedId] = useState(stories[0].id);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [dismissed, setDismissed] = useState<string[]>([]);
   const [query, setQuery] = useState("");
-  const [chatInput, setChatInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [voiceState, setVoiceState] = useState<"idle" | "loading" | "playing">("idle");
-  const [livePreview, setLivePreview] = useState<any>(null);
-  const [liveBusy, setLiveBusy] = useState(false);
+  const [historyRange, setHistoryRange] = useState<HistoryRange>("all");
+  const [hydrated, setHydrated] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [listening, setListening] = useState(false);
+  const [voiceHint, setVoiceHint] = useState("Say “next”, “favorite”, “dismiss”, “read”, “history” or “home”.");
+  const anchorTime = useMemo(demoClock, []);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "agent",
-      text:
-        "I reviewed the seeded competition corpus and selected 7 stories. Demo Mode makes no live-news claims. Ask for the weirdest one, a region, a category, verification, sources, or a deep dive.",
-    },
-  ]);
+  const recognitionRef = useRef<any>(null);
+  const keepListeningRef = useRef(false);
+  const gestureRef = useRef<{ id: string; x: number } | null>(null);
 
-  const selected =
-    demoBriefing.stories.find((story) => story.id === selectedId) ?? demoBriefing.stories[0];
+  useEffect(() => {
+    setFavorites(parseStoredIds(FAVORITES_KEY));
+    setDismissed(parseStoredIds(DISMISSED_KEY));
+    setHydrated(true);
+  }, []);
 
-  const visibleStories = useMemo(() => {
-    const needle = query.toLowerCase().trim();
-    if (!needle) return demoBriefing.stories;
-    return demoBriefing.stories.filter((story) =>
-      [story.title, story.country, story.region, story.category, story.tags.join(" ")]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
-    );
-  }, [query]);
+  useEffect(() => {
+    if (hydrated) localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+  }, [favorites, hydrated]);
 
-  async function askAgent(message: string) {
-    const clean = message.trim();
-    if (!clean || busy) return;
+  useEffect(() => {
+    if (hydrated) localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed));
+  }, [dismissed, hydrated]);
 
-    setMessages((current) => [...current, { role: "user", text: clean }]);
-    setChatInput("");
-    setBusy(true);
+  useEffect(() => {
+    return () => {
+      keepListeningRef.current = false;
+      recognitionRef.current?.stop?.();
+      audioRef.current?.pause();
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
 
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: clean, storyId: selected.id }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Agent request failed.");
+  const homeStories = useMemo(
+    () =>
+      stories.filter(
+        (story) =>
+          anchorTime - new Date(story.publicationDate).getTime() <= TWO_DAYS_MS &&
+          !dismissed.includes(story.id),
+      ),
+    [anchorTime, dismissed, stories],
+  );
 
-      setMessages((current) => [...current, { role: "agent", text: payload.text }]);
-      if (payload.storyId && demoBriefing.stories.some((story) => story.id === payload.storyId)) {
-        setSelectedId(payload.storyId);
-      }
-    } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          role: "agent",
-          text: "The conversational layer failed safely. The researched briefing remains available.",
-        },
-      ]);
-    } finally {
-      setBusy(false);
+  const favoriteStories = useMemo(
+    () => stories.filter((story) => favorites.includes(story.id)),
+    [favorites, stories],
+  );
+
+  const historyStories = useMemo(() => {
+    if (historyRange === "all") return stories;
+    const days = historyRange === "2d" ? 2 : historyRange === "7d" ? 7 : 30;
+    const cutoff = anchorTime - days * 24 * 60 * 60 * 1000;
+    return stories.filter((story) => new Date(story.publicationDate).getTime() >= cutoff);
+  }, [anchorTime, historyRange, stories]);
+
+  const baseStories =
+    tab === "home" ? homeStories : tab === "favorites" ? favoriteStories : historyStories;
+
+  const visibleStories = useMemo(
+    () => baseStories.filter((story) => storyMatches(story, query)),
+    [baseStories, query],
+  );
+
+  const selected = stories.find((story) => story.id === selectedId) ?? stories[0];
+
+  useEffect(() => {
+    if (visibleStories.length && !visibleStories.some((story) => story.id === selectedId)) {
+      setSelectedId(visibleStories[0].id);
     }
-  }
+  }, [selectedId, visibleStories]);
 
-  async function submitChat(event: FormEvent) {
-    event.preventDefault();
-    await askAgent(chatInput);
+  function stopNarration() {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    window.speechSynthesis?.cancel();
+    setVoiceState("idle");
   }
 
   function browserSpeak(text: string) {
@@ -108,24 +151,24 @@ export default function Home() {
       setVoiceState("idle");
       return;
     }
+
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1;
     utterance.onend = () => setVoiceState("idle");
+    utterance.onerror = () => setVoiceState("idle");
     setVoiceState("playing");
     window.speechSynthesis.speak(utterance);
   }
 
   async function narrate() {
-    if (voiceState === "playing") {
-      audioRef.current?.pause();
-      window.speechSynthesis?.cancel();
-      setVoiceState("idle");
+    if (voiceState === "playing" || voiceState === "loading") {
+      stopNarration();
       return;
     }
 
     setVoiceState("loading");
-    const text = selected.title + ". " + selected.detailedSummary;
+    const text = `${selected.title}. ${selected.detailedSummary}`;
 
     try {
       const response = await fetch("/api/narrate", {
@@ -147,6 +190,10 @@ export default function Home() {
         setVoiceState("idle");
         URL.revokeObjectURL(url);
       };
+      audio.onerror = () => {
+        setVoiceState("idle");
+        URL.revokeObjectURL(url);
+      };
       setVoiceState("playing");
       await audio.play();
     } catch {
@@ -154,390 +201,442 @@ export default function Home() {
     }
   }
 
-  async function runLivePreview() {
-    setLiveBusy(true);
-    try {
-      const response = await fetch("/api/research", { method: "POST" });
-      const payload = await response.json();
-      setLivePreview(payload);
-    } catch {
-      setLivePreview({ error: "Live discovery could not be reached. Demo Mode is unaffected." });
-    } finally {
-      setLiveBusy(false);
+  function toggleFavorite(id: string) {
+    setFavorites((current) =>
+      current.includes(id) ? current.filter((storyId) => storyId !== id) : [...current, id],
+    );
+  }
+
+  function dismissStory(id: string) {
+    setDismissed((current) => (current.includes(id) ? current : [...current, id]));
+
+    if (tab === "home" && selectedId === id) {
+      const next = homeStories.find((story) => story.id !== id);
+      if (next) setSelectedId(next.id);
     }
   }
 
+  function restoreDismissed() {
+    setDismissed([]);
+  }
+
+  function selectAdjacent(direction: 1 | -1) {
+    if (!visibleStories.length) return;
+    const currentIndex = visibleStories.findIndex((story) => story.id === selectedId);
+    const safeIndex = currentIndex < 0 ? 0 : currentIndex;
+    const nextIndex = (safeIndex + direction + visibleStories.length) % visibleStories.length;
+    setSelectedId(visibleStories[nextIndex].id);
+    stopNarration();
+  }
+
+  function onStoryPointerDown(storyId: string, event: ReactPointerEvent<HTMLDivElement>) {
+    gestureRef.current = { id: storyId, x: event.clientX };
+  }
+
+  function onStoryPointerUp(storyId: string, event: ReactPointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    if (tab !== "home" || !gesture || gesture.id !== storyId) return;
+    if (gesture.x - event.clientX > 72) dismissStory(storyId);
+  }
+
+  function stopHandsFree() {
+    keepListeningRef.current = false;
+    recognitionRef.current?.stop?.();
+    recognitionRef.current = null;
+    setListening(false);
+  }
+
+  function handleVoiceCommand(raw: string) {
+    const command = raw.toLowerCase();
+    setVoiceHint(`Heard: “${raw}”`);
+
+    if (command.includes("next")) return selectAdjacent(1);
+    if (command.includes("previous") || command.includes("back")) return selectAdjacent(-1);
+    if (command.includes("favorite") || command.includes("save")) return toggleFavorite(selected.id);
+    if (command.includes("dismiss") || command.includes("skip")) return dismissStory(selected.id);
+    if (command.includes("read") || command.includes("speak")) return void narrate();
+    if (command.includes("favorites")) return changeTab("favorites");
+    if (command.includes("history")) return changeTab("history");
+    if (command.includes("home") || command.includes("new stories")) return changeTab("home");
+    if (command.includes("stop listening")) return stopHandsFree();
+    if (command.includes("stop")) return stopNarration();
+
+    setVoiceHint("Command not recognized. Try next, previous, favorite, dismiss, read, history or home.");
+  }
+
+  function startHandsFree() {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceHint("Hands-free navigation is not supported by this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event: any) => {
+      const last = event.results[event.results.length - 1];
+      const transcript = last?.[0]?.transcript?.trim();
+      if (transcript) handleVoiceCommand(transcript);
+    };
+    recognition.onerror = (event: any) => {
+      if (event?.error !== "no-speech") {
+        setVoiceHint(`Voice navigation error: ${event?.error ?? "unknown error"}.`);
+      }
+    };
+    recognition.onend = () => {
+      if (!keepListeningRef.current) {
+        setListening(false);
+        return;
+      }
+      try {
+        recognition.start();
+      } catch {
+        setListening(false);
+      }
+    };
+
+    keepListeningRef.current = true;
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+    setVoiceHint("Hands-free navigation is listening.");
+  }
+
+  function changeTab(nextTab: Tab) {
+    setTab(nextTab);
+    setQuery("");
+    stopNarration();
+  }
+
+  const tabTitle =
+    tab === "home" ? "New stories" : tab === "favorites" ? "Favorites" : "History";
+
+  const emptyMessage =
+    tab === "home"
+      ? dismissed.length
+        ? "You cleared the current feed. Restore dismissed stories to review it again."
+        : "No stories landed in the current two-day window."
+      : tab === "favorites"
+        ? "No favorites yet. Save a story with the star."
+        : "No archived stories match this search and timeframe.";
+
   return (
-    <main className="min-h-screen px-4 py-4 md:px-7 md:py-6">
-      <div className="mx-auto max-w-[1500px]">
-        <header className="mb-5 flex flex-col gap-4 border-b border-[var(--line)] pb-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="mb-2 flex items-center gap-3">
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-[var(--ink)] text-sm font-black text-white">
-                A
-              </div>
-              <span className="abs-mono text-xs text-[var(--muted)]">
-                Autonomous global absurdity desk
-              </span>
+    <main className="min-h-screen px-3 py-3 md:px-6 md:py-5">
+      <div className="mx-auto max-w-[1440px]">
+        <header className="mb-4 flex flex-col gap-4 border-b border-[var(--line)] pb-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--ink)] text-lg font-black text-white">
+              A
             </div>
-            <h1 className="text-3xl font-black tracking-[-0.045em] md:text-5xl">
-              Absurdity read the news so you did not have to.
-            </h1>
+            <div>
+              <h1 className="text-2xl font-black tracking-[-0.04em]">Absurdity</h1>
+              <p className="text-sm text-[var(--muted)]">
+                The world&apos;s strange stories, already sorted.
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 self-start md:self-auto">
+
+          <nav className="flex w-full gap-1 rounded-xl border border-[var(--line)] bg-[var(--paper)] p-1 lg:w-auto">
+            {(
+              [
+                ["home", "New stories"],
+                ["favorites", `Favorites ${favorites.length ? `(${favorites.length})` : ""}`],
+                ["history", "History"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => changeTab(id)}
+                className={
+                  "min-w-0 flex-1 rounded-lg px-4 py-2 text-sm font-bold transition lg:flex-none " +
+                  (tab === id
+                    ? "bg-[var(--ink)] text-white"
+                    : "text-[var(--muted)] hover:bg-[var(--soft)]")
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="flex items-center gap-2">
             <span className="rounded-full border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs font-bold">
               DEMO
             </span>
-            <span className="rounded-full bg-[var(--ink)] px-3 py-2 text-xs font-bold text-white">
-              7 SELECTED
-            </span>
+            <button
+              onClick={listening ? stopHandsFree : startHandsFree}
+              className={
+                "rounded-full px-3 py-2 text-xs font-bold transition " +
+                (listening
+                  ? "bg-[var(--accent)] text-white"
+                  : "border border-[var(--line)] bg-[var(--paper)]")
+              }
+              title={voiceHint}
+            >
+              {listening ? "Listening…" : "Hands-free"}
+            </button>
           </div>
         </header>
 
-        <section className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-5">
-          {[
-            ["1,842", "stories scanned"],
-            ["43", "unusual candidates"],
-            ["19", "verified"],
-            ["7", "selected"],
-            ["7", "countries"],
-          ].map(([value, label]) => (
-            <div key={label} className="abs-card rounded-2xl px-4 py-4">
-              <div className="text-2xl font-black tracking-[-0.04em]">{value}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">{label}</div>
-            </div>
-          ))}
-        </section>
-
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
-          <div className="min-w-0">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <nav className="flex gap-1 rounded-full border border-[var(--line)] bg-[var(--paper)] p-1">
-                <button
-                  onClick={() => setView("briefing")}
-                  className={
-                    "rounded-full px-4 py-2 text-sm font-bold " +
-                    (view === "briefing"
-                      ? "bg-[var(--ink)] text-white"
-                      : "text-[var(--muted)]")
-                  }
-                >
-                  Briefing
-                </button>
-                <button
-                  onClick={() => setView("research")}
-                  className={
-                    "rounded-full px-4 py-2 text-sm font-bold " +
-                    (view === "research"
-                      ? "bg-[var(--ink)] text-white"
-                      : "text-[var(--muted)]")
-                  }
-                >
-                  Research activity
-                </button>
-              </nav>
-
-              <div className="flex items-center gap-2">
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Filter stories"
-                  className="w-44 rounded-full border border-[var(--line)] bg-[var(--paper)] px-4 py-2 text-sm outline-none focus:border-[var(--ink)]"
-                />
-                <button
-                  onClick={runLivePreview}
-                  disabled={liveBusy}
-                  className="rounded-full border border-[var(--line)] bg-[var(--paper)] px-4 py-2 text-sm font-bold disabled:opacity-50"
-                >
-                  {liveBusy ? "Scanning…" : "Live RSS preview"}
-                </button>
-              </div>
-            </div>
-
-            {livePreview && (
-              <div className="mb-4 rounded-2xl border border-[var(--line)] bg-[#edf5f1] p-4 text-sm">
-                <div className="font-bold">Live preview</div>
-                {livePreview.error ? (
-                  <div className="mt-1 text-[var(--muted)]">{livePreview.error}</div>
-                ) : (
-                  <div className="mt-1 text-[var(--muted)]">
-                    Scanned {livePreview.scanned} RSS items; {livePreview.unusualCandidates} passed
-                    deterministic unusual-term triage.
-                    {livePreview.failures?.length
-                      ? " Feed failures: " + livePreview.failures.join(", ") + "."
-                      : ""}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {view === "briefing" ? (
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,0.96fr)_minmax(340px,1.04fr)]">
-                <div className="abs-card overflow-hidden rounded-3xl">
-                  <div className="border-b border-[var(--line)] px-5 py-4">
-                    <div className="abs-mono text-xs text-[var(--muted)]">Today&apos;s desk</div>
-                    <h2 className="mt-1 text-xl font-black">Seven stories survived the cut.</h2>
-                  </div>
-                  <div className="abs-scrollbar max-h-[760px] overflow-y-auto">
-                    {visibleStories.map((story) => (
-                      <button
-                        key={story.id}
-                        onClick={() => setSelectedId(story.id)}
-                        className={
-                          "block w-full border-b border-[var(--line)] p-5 text-left transition last:border-b-0 " +
-                          (selected.id === story.id ? "bg-[#f0ebe0]" : "hover:bg-[#f8f5ef]")
-                        }
-                      >
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className="abs-mono text-[10px] text-[var(--accent-dark)]">
-                              #{story.rank}
-                            </span>
-                            <span className="rounded-full bg-[var(--soft)] px-2.5 py-1 text-[11px] font-bold">
-                              {story.category}
-                            </span>
-                          </div>
-                          <span className="text-[11px] text-[var(--muted)]">{story.country}</span>
-                        </div>
-                        <h3 className="text-lg font-black leading-tight tracking-[-0.025em]">
-                          {story.title}
-                        </h3>
-                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--muted)]">
-                          {story.summary}
-                        </p>
-                        <div className="mt-3 flex items-center gap-3 text-[11px] text-[var(--muted)]">
-                          <span>{confidenceLabel(story)}</span>
-                          <span>•</span>
-                          <span>
-                            {story.sources.length} source{story.sources.length === 1 ? "" : "s"}
-                          </span>
-                          {story.seriousness === "serious" && (
-                            <>
-                              <span>•</span>
-                              <span className="font-bold text-[var(--amber)]">serious tone</span>
-                            </>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <article className="abs-card rounded-3xl p-6 md:p-7">
-                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full bg-[var(--ink)] px-3 py-1.5 text-[11px] font-bold text-white">
-                        {selected.country}
-                      </span>
-                      <span className="rounded-full bg-[var(--soft)] px-3 py-1.5 text-[11px] font-bold">
-                        {selected.category}
-                      </span>
-                    </div>
-                    <button
-                      onClick={narrate}
-                      className="rounded-full border border-[var(--line)] px-4 py-2 text-sm font-bold"
-                    >
-                      {voiceState === "loading"
-                        ? "Preparing audio…"
-                        : voiceState === "playing"
-                          ? "Stop narration"
-                          : "Read this to me"}
-                    </button>
-                  </div>
-
-                  <h2 className="text-3xl font-black leading-[1.03] tracking-[-0.045em] md:text-4xl">
-                    {selected.title}
-                  </h2>
-                  <p className="mt-5 text-base leading-7 text-[var(--muted)]">
-                    {selected.detailedSummary}
-                  </p>
-
-                  <div className="my-6 border-y border-[var(--line)] py-5">
-                    <div className="abs-mono text-[10px] text-[var(--muted)]">
-                      Why Absurdity selected it
-                    </div>
-                    <p className="mt-2 text-lg font-bold leading-7">{selected.whyItsWeird}</p>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <div className="abs-mono text-[10px] text-[var(--muted)]">Event date</div>
-                      <div className="mt-1 text-sm font-bold">{formatDate(selected.eventDate)}</div>
-                    </div>
-                    <div>
-                      <div className="abs-mono text-[10px] text-[var(--muted)]">
-                        Publication date
-                      </div>
-                      <div className="mt-1 text-sm font-bold">
-                        {formatDate(selected.publicationDate)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="abs-mono text-[10px] text-[var(--muted)]">Verification</div>
-                      <div className="mt-1 text-sm font-bold">{confidenceLabel(selected)}</div>
-                    </div>
-                    <div>
-                      <div className="abs-mono text-[10px] text-[var(--muted)]">
-                        Reporting cluster
-                      </div>
-                      <div className="mt-1 text-sm font-bold">
-                        {selected.sources.length} attached source
-                        {selected.sources.length === 1 ? "" : "s"}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 rounded-2xl bg-[#f7f1e8] p-4">
-                    <div className="text-xs font-black uppercase tracking-[0.12em] text-[var(--accent-dark)]">
-                      Demo integrity note
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                      {selected.verificationNotes}
-                    </p>
-                  </div>
-
-                  <div className="mt-6">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="font-black">Sources</div>
-                      <button
-                        onClick={() => setView("research")}
-                        className="text-xs font-bold text-[var(--accent-dark)]"
-                      >
-                        See research trail →
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {selected.sources.map((source) => (
-                        <a
-                          key={source.url}
-                          href={source.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center justify-between gap-4 rounded-xl border border-[var(--line)] px-4 py-3 text-sm hover:bg-[#f8f5ef]"
-                        >
-                          <span className="font-bold">{source.publisher}</span>
-                          <span className="text-xs text-[var(--muted)]">{source.sourceType}</span>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                </article>
-              </div>
-            ) : (
-              <div className="abs-card rounded-3xl p-6 md:p-8">
-                <div className="flex flex-col gap-3 border-b border-[var(--line)] pb-6 md:flex-row md:items-end md:justify-between">
-                  <div>
-                    <div className="abs-mono text-xs text-[var(--muted)]">
-                      Autonomous work, made visible
-                    </div>
-                    <h2 className="mt-2 text-3xl font-black tracking-[-0.04em]">
-                      {selected.shortTitle}
-                    </h2>
-                  </div>
-                  <span className="rounded-full bg-[#edf5f1] px-3 py-2 text-xs font-bold text-[var(--green)]">
-                    {selected.research.length} recorded steps
-                  </span>
-                </div>
-
-                <div className="mt-6 grid gap-3">
-                  {selected.research.map((step, index) => (
-                    <div
-                      key={step.label + step.at}
-                      className="grid grid-cols-[36px_minmax(0,1fr)_52px] gap-3 rounded-2xl border border-[var(--line)] p-4"
-                    >
-                      <div
-                        className={
-                          "grid h-9 w-9 place-items-center rounded-full text-xs font-black " +
-                          (step.status === "warning"
-                            ? "bg-[#f6ecd9] text-[var(--amber)]"
-                            : "bg-[#e6f1ec] text-[var(--green)]")
-                        }
-                      >
-                        {index + 1}
-                      </div>
-                      <div>
-                        <div className="font-black">{step.label}</div>
-                        <div className="mt-1 text-sm leading-6 text-[var(--muted)]">
-                          {step.detail}
-                        </div>
-                      </div>
-                      <div className="pt-1 text-right text-xs text-[var(--muted)]">{step.at}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+        <section className="mb-3 flex min-h-10 flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="font-black">{tabTitle}</span>
+            <span className="ml-2 text-sm text-[var(--muted)]">
+              {visibleStories.length} {visibleStories.length === 1 ? "story" : "stories"}
+            </span>
           </div>
 
-          <aside className="abs-card flex min-h-[640px] flex-col rounded-3xl p-5 xl:sticky xl:top-4 xl:h-[calc(100vh-32px)]">
-            <div className="border-b border-[var(--line)] pb-4">
-              <div className="abs-mono text-[10px] text-[var(--muted)]">Desk conversation</div>
-              <h2 className="mt-1 text-xl font-black">Ask what the desk already knows.</h2>
-              <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
-                Grounded in the briefing corpus first. Optional OpenAI reasoning activates only when configured.
-              </p>
-            </div>
-
-            <div className="my-4 flex flex-wrap gap-2">
-              {promptChips.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => askAgent(prompt)}
-                  className="rounded-full border border-[var(--line)] bg-[#f8f5ef] px-3 py-2 text-xs font-bold hover:border-[var(--ink)]"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-
-            <div className="abs-scrollbar flex-1 space-y-3 overflow-y-auto pr-1">
-              {messages.map((message, index) => (
-                <div key={index} className={message.role === "agent" ? "pr-7" : "pl-7"}>
-                  <div
-                    className={
-                      "whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 " +
-                      (message.role === "agent"
-                        ? "bg-[#f1ece3]"
-                        : "bg-[var(--ink)] text-white")
-                    }
-                  >
-                    {message.text}
-                  </div>
-                </div>
-              ))}
-              {busy && (
-                <div className="pr-7">
-                  <div className="rounded-2xl bg-[#f1ece3] px-4 py-3 text-sm text-[var(--muted)]">
-                    Checking the researched corpus…
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <form onSubmit={submitChat} className="mt-4 border-t border-[var(--line)] pt-4">
-              <div className="flex gap-2">
-                <input
-                  value={chatInput}
-                  onChange={(event) => setChatInput(event.target.value)}
-                  placeholder="Ask about the briefing…"
-                  className="min-w-0 flex-1 rounded-full border border-[var(--line)] bg-white px-4 py-3 text-sm outline-none focus:border-[var(--ink)]"
-                />
-                <button
-                  disabled={busy || !chatInput.trim()}
-                  className="rounded-full bg-[var(--accent)] px-4 py-3 text-sm font-black text-white disabled:opacity-40"
-                >
-                  Ask
-                </button>
-              </div>
-            </form>
-          </aside>
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+            {tab !== "home" && (
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search title, place, category…"
+                className="min-w-[220px] rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--ink)]"
+              />
+            )}
+            {tab === "history" && (
+              <select
+                value={historyRange}
+                onChange={(event) => setHistoryRange(event.target.value as HistoryRange)}
+                className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold outline-none"
+              >
+                <option value="2d">Last 2 days</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+                <option value="all">All history</option>
+              </select>
+            )}
+            {tab === "home" && dismissed.length > 0 && (
+              <button
+                onClick={restoreDismissed}
+                className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold"
+              >
+                Restore dismissed ({dismissed.length})
+              </button>
+            )}
+          </div>
         </section>
 
-        <footer className="mt-5 flex flex-col gap-2 border-t border-[var(--line)] pt-4 text-xs text-[var(--muted)] md:flex-row md:items-center md:justify-between">
+        <section className="grid gap-3 lg:grid-cols-[340px_minmax(0,1fr)]">
+          <aside className="abs-card overflow-hidden rounded-2xl">
+            <div className="border-b border-[var(--line)] px-4 py-3">
+              <div className="abs-mono text-[10px] text-[var(--muted)]">
+                {tab === "home"
+                  ? "48-hour feed"
+                  : tab === "favorites"
+                    ? "saved stories"
+                    : "permanent archive"}
+              </div>
+              <div className="mt-1 text-xs text-[var(--muted)]">
+                {tab === "home" ? "Swipe left or use × to dismiss." : "Tap a title to read."}
+              </div>
+            </div>
+
+            <div className="abs-scrollbar story-list overflow-y-auto">
+              {visibleStories.length ? (
+                visibleStories.map((story) => {
+                  const isSelected = selected.id === story.id;
+                  const isFavorite = favorites.includes(story.id);
+
+                  return (
+                    <div
+                      key={story.id}
+                      onPointerDown={(event) => onStoryPointerDown(story.id, event)}
+                      onPointerUp={(event) => onStoryPointerUp(story.id, event)}
+                      className={
+                        "group border-b border-[var(--line)] last:border-b-0 " +
+                        (isSelected ? "bg-[var(--soft)]" : "bg-[var(--paper)] hover:bg-[#f8f8f5]")
+                      }
+                    >
+                      <button
+                        onClick={() => {
+                          setSelectedId(story.id);
+                          stopNarration();
+                        }}
+                        className="block w-full px-4 pb-2 pt-4 text-left"
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="abs-mono text-[10px] text-[var(--accent-dark)]">
+                            #{story.rank} · {story.country}
+                          </span>
+                          <span className="text-[10px] font-bold text-[var(--muted)]">
+                            {formatDate(story.publicationDate)}
+                          </span>
+                        </div>
+                        <h2 className="text-[15px] font-black leading-5 tracking-[-0.02em]">
+                          {story.title}
+                        </h2>
+                      </button>
+
+                      <div className="flex items-center justify-between px-3 pb-3">
+                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-[var(--muted)]">
+                          {story.category}
+                        </span>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => toggleFavorite(story.id)}
+                            className="grid h-8 w-8 place-items-center rounded-lg text-lg hover:bg-white"
+                            aria-label={isFavorite ? "Remove favorite" : "Favorite story"}
+                            title={isFavorite ? "Remove favorite" : "Favorite"}
+                          >
+                            {isFavorite ? "★" : "☆"}
+                          </button>
+                          {tab === "home" && (
+                            <button
+                              onClick={() => dismissStory(story.id)}
+                              className="grid h-8 w-8 place-items-center rounded-lg text-base hover:bg-white"
+                              aria-label="Dismiss story"
+                              title="Dismiss"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="p-6 text-sm leading-6 text-[var(--muted)]">{emptyMessage}</div>
+              )}
+            </div>
+          </aside>
+
+          <article className="abs-card flex min-h-[680px] flex-col overflow-hidden rounded-2xl">
+            <div className="border-b border-[var(--line)] px-5 py-4 md:px-7">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-[var(--ink)] px-3 py-1.5 text-[11px] font-bold text-white">
+                    {selected.country}
+                  </span>
+                  <span className="rounded-full bg-[var(--soft)] px-3 py-1.5 text-[11px] font-bold">
+                    {selected.category}
+                  </span>
+                  <span className="text-xs text-[var(--muted)]">
+                    Published {formatDate(selected.publicationDate, true)}
+                  </span>
+                </div>
+                <button
+                  onClick={() => toggleFavorite(selected.id)}
+                  className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold"
+                >
+                  {favorites.includes(selected.id) ? "★ Favorited" : "☆ Favorite"}
+                </button>
+              </div>
+              <h2 className="max-w-5xl text-3xl font-black leading-[1.05] tracking-[-0.045em] md:text-5xl">
+                {selected.title}
+              </h2>
+            </div>
+
+            <div className="abs-scrollbar reader-scroll flex-1 overflow-y-auto px-5 py-5 md:px-7 md:py-6">
+              <section className="mb-6">
+                <div className="abs-mono text-[10px] text-[var(--muted)]">Sources</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selected.sources.map((source) => (
+                    <a
+                      key={source.url}
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold hover:border-[var(--ink)]"
+                    >
+                      {source.publisher} ↗
+                    </a>
+                  ))}
+                </div>
+              </section>
+
+              <section className="max-w-4xl">
+                <div className="abs-mono text-[10px] text-[var(--muted)]">Story</div>
+                <p className="mt-3 text-lg leading-8 text-[#282823] md:text-xl md:leading-9">
+                  {selected.detailedSummary}
+                </p>
+              </section>
+
+              <section className="mt-8 grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-[var(--line)] p-4">
+                  <div className="abs-mono text-[10px] text-[var(--muted)]">
+                    Why it made the cut
+                  </div>
+                  <p className="mt-2 text-sm font-bold leading-6">{selected.whyItsWeird}</p>
+                </div>
+                <div className="rounded-xl border border-[var(--line)] p-4">
+                  <div className="abs-mono text-[10px] text-[var(--muted)]">Verification</div>
+                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                    {selected.verificationNotes}
+                  </p>
+                </div>
+              </section>
+
+              <section className="mt-6 grid gap-3 border-t border-[var(--line)] pt-5 text-sm sm:grid-cols-3">
+                <div>
+                  <div className="text-xs text-[var(--muted)]">Event date</div>
+                  <div className="mt-1 font-bold">{formatDate(selected.eventDate, true)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-[var(--muted)]">Confidence</div>
+                  <div className="mt-1 font-bold capitalize">{selected.confidence}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-[var(--muted)]">Region</div>
+                  <div className="mt-1 font-bold">{selected.region}</div>
+                </div>
+              </section>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] bg-[var(--paper)] px-4 py-3 md:px-6">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => selectAdjacent(-1)}
+                  disabled={!visibleStories.length}
+                  className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold disabled:opacity-40"
+                >
+                  ← Previous
+                </button>
+                <button
+                  onClick={() => selectAdjacent(1)}
+                  disabled={!visibleStories.length}
+                  className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold disabled:opacity-40"
+                >
+                  Next →
+                </button>
+                {tab === "home" && (
+                  <button
+                    onClick={() => dismissStory(selected.id)}
+                    className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold"
+                  >
+                    Dismiss
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={narrate}
+                className="rounded-xl bg-[var(--ink)] px-5 py-3 text-sm font-black text-white"
+              >
+                {voiceState === "loading"
+                  ? "Preparing…"
+                  : voiceState === "playing"
+                    ? "■ Stop"
+                    : "◉ Speak"}
+              </button>
+            </div>
+          </article>
+        </section>
+
+        <footer className="mt-3 flex flex-col gap-1 px-1 text-xs text-[var(--muted)] md:flex-row md:items-center md:justify-between">
           <span>
-            Seeded Demo Mode • same story model, dashboard, agent and research trail intended for Live Mode
+            {demoBriefing.mode === "demo"
+              ? "Demo clock follows the newest fixture so the 48-hour feed remains testable."
+              : "Home only shows stories published in the last 48 hours."}
           </span>
-          <span>RSS first • deterministic triage • AI on shortlist • voice on demand</span>
+          <span>{voiceHint}</span>
         </footer>
       </div>
     </main>

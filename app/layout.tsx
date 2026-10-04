@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Absurdity — Autonomous Global Absurdity Desk",
-  description: "A researched global briefing of the genuinely extraordinary.",
+  title: "Absurdity — The world's strange stories, already sorted",
+  description:
+    "A global strange-news reader with source links, favorites, permanent history and hands-free narration.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
