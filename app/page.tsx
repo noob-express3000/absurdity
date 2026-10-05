@@ -23,8 +23,13 @@ function parseStoredIds(key: string) {
   }
 }
 
-function formatDate(value: string, includeTime = false) {
+function formatDate(value: string, includeTime = false, clientReady = false) {
   try {
+    // SSR and the first client render must agree before applying browser locale/timezone.
+    if (!clientReady) {
+      const iso = new Date(value).toISOString();
+      return includeTime ? iso.slice(0, 16).replace("T", " ") + " UTC" : iso.slice(0, 10);
+    }
     return new Intl.DateTimeFormat("en", {
       day: "2-digit",
       month: "short",
@@ -80,6 +85,9 @@ export default function Home() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const keepListeningRef = useRef(false);
+  const commandHandlerRef = useRef<(command: string) => void>(() => {});
+  const narrationRequestRef = useRef(0);
+  const audioUrlRef = useRef<string | null>(null);
   const gestureRef = useRef<{ id: string; x: number } | null>(null);
 
   useEffect(() => {
@@ -120,11 +128,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (hydrated) localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    try {
+      if (hydrated) localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    } catch { /* Reading still works when browser storage is unavailable. */ }
   }, [favorites, hydrated]);
 
   useEffect(() => {
-    if (hydrated) localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed));
+    try {
+      if (hydrated) localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed));
+    } catch { /* Reading still works when browser storage is unavailable. */ }
   }, [dismissed, hydrated]);
 
   useEffect(() => {
@@ -132,6 +144,8 @@ export default function Home() {
       keepListeningRef.current = false;
       recognitionRef.current?.stop?.();
       audioRef.current?.pause();
+      narrationRequestRef.current += 1;
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
       window.speechSynthesis?.cancel();
     };
   }, []);
@@ -141,6 +155,7 @@ export default function Home() {
       stories.filter(
         (story) =>
           anchorTime - new Date(story.publicationDate).getTime() <= TWO_DAYS_MS &&
+          new Date(story.publicationDate).getTime() <= anchorTime &&
           !dismissed.includes(story.id),
       ),
     [anchorTime, dismissed, stories],
@@ -186,8 +201,11 @@ export default function Home() {
   }, [selectedId, visibleStories]);
 
   function stopNarration() {
+    narrationRequestRef.current += 1;
     audioRef.current?.pause();
     audioRef.current = null;
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    audioUrlRef.current = null;
     window.speechSynthesis?.cancel();
     setVoiceState("idle");
   }
@@ -214,6 +232,7 @@ export default function Home() {
     }
 
     setVoiceState("loading");
+    const requestId = ++narrationRequestRef.current;
     const text = `${selected.title}. ${selected.detailedSummary}`;
 
     try {
@@ -223,27 +242,33 @@ export default function Home() {
         body: JSON.stringify({ text }),
       });
 
+      if (requestId !== narrationRequestRef.current) return;
+
       if (!response.ok) {
         browserSpeak(text);
         return;
       }
 
       const blob = await response.blob();
+      if (requestId !== narrationRequestRef.current) return;
       const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
       const audio = new Audio(url);
       audioRef.current = audio;
       audio.onended = () => {
+        if (requestId !== narrationRequestRef.current) return;
         setVoiceState("idle");
         URL.revokeObjectURL(url);
       };
       audio.onerror = () => {
+        if (requestId !== narrationRequestRef.current) return;
         setVoiceState("idle");
         URL.revokeObjectURL(url);
       };
       setVoiceState("playing");
       await audio.play();
     } catch {
-      browserSpeak(text);
+      if (requestId === narrationRequestRef.current) browserSpeak(text);
     }
   }
 
@@ -257,6 +282,7 @@ export default function Home() {
     setDismissed((current) => (current.includes(id) ? current : [...current, id]));
 
     if (tab === "home" && selectedId === id) {
+      stopNarration();
       const next = homeStories.find((story) => story.id !== id);
       if (next) setSelectedId(next.id);
     }
@@ -299,10 +325,10 @@ export default function Home() {
 
     if (command.includes("next")) return selectAdjacent(1);
     if (command.includes("previous") || command.includes("back")) return selectAdjacent(-1);
+    if (command.includes("favorites")) return changeTab("favorites");
     if (command.includes("favorite") || command.includes("save")) return toggleFavorite(selected.id);
     if (command.includes("dismiss") || command.includes("skip")) return dismissStory(selected.id);
     if (command.includes("read") || command.includes("speak")) return void narrate();
-    if (command.includes("favorites")) return changeTab("favorites");
     if (command.includes("history")) return changeTab("history");
     if (command.includes("home") || command.includes("new stories")) return changeTab("home");
     if (command.includes("stop listening")) return stopHandsFree();
@@ -310,6 +336,10 @@ export default function Home() {
 
     setVoiceHint("Command not recognized. Try next, previous, favorite, dismiss, read, history or home.");
   }
+
+  useEffect(() => {
+    commandHandlerRef.current = handleVoiceCommand;
+  });
 
   function startHandsFree() {
     const SpeechRecognition =
@@ -327,9 +357,13 @@ export default function Home() {
     recognition.onresult = (event: any) => {
       const last = event.results[event.results.length - 1];
       const transcript = last?.[0]?.transcript?.trim();
-      if (transcript) handleVoiceCommand(transcript);
+      if (transcript) commandHandlerRef.current(transcript);
     };
     recognition.onerror = (event: any) => {
+      if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)) {
+        keepListeningRef.current = false;
+        setListening(false);
+      }
       if (event?.error !== "no-speech") {
         setVoiceHint(`Voice navigation error: ${event?.error ?? "unknown error"}.`);
       }
@@ -348,7 +382,14 @@ export default function Home() {
 
     keepListeningRef.current = true;
     recognitionRef.current = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      keepListeningRef.current = false;
+      recognitionRef.current = null;
+      setVoiceHint("Voice navigation could not start. Please try again.");
+      return;
+    }
     setListening(true);
     setVoiceHint("Hands-free navigation is listening.");
   }
@@ -372,329 +413,116 @@ export default function Home() {
         : "No archived stories match this search and timeframe.";
 
   return (
-    <main className="min-h-screen px-3 py-3 md:px-6 md:py-5">
-      <div className="mx-auto max-w-[1440px]">
-        <header className="mb-4 flex flex-col gap-4 border-b border-[var(--line)] pb-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--ink)] text-lg font-black text-white">
-              A
-            </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-[-0.04em]">Absurdity</h1>
-              <p className="text-sm text-[var(--muted)]">
-                The world&apos;s strange stories, already sorted.
-              </p>
-            </div>
-          </div>
+    <main className="reader-app">
+      <header className="app-header">
+        <button className="brand" onClick={() => changeTab("home")} aria-label="Absurdity home">
+          <span className="brand-icon" aria-hidden="true">A</span>
+          <h1>Absurdity</h1>
+        </button>
+        <nav className="tabs" aria-label="Story views">
+          {([ ["home", "New stories"], ["favorites", "Favorites"], ["history", "History"] ] as const).map(([id, label]) => (
+            <button key={id} onClick={() => changeTab(id)} aria-current={tab === id ? "page" : undefined}>
+              {label}{id === "favorites" && favorites.length > 0 ? ` (${favorites.length})` : ""}
+            </button>
+          ))}
+        </nav>
+        <span className="data-mode" title={usingLive ? "Live story archive" : "These stories are demonstration fixtures"}>
+          {usingLive ? "Live" : dataMode === "live" ? "Demo fallback" : "Demo"}
+        </span>
+      </header>
 
-          <nav className="flex w-full gap-1 rounded-xl border border-[var(--line)] bg-[var(--paper)] p-1 lg:w-auto">
-            {(
-              [
-                ["home", "New stories"],
-                ["favorites", `Favorites ${favorites.length ? `(${favorites.length})` : ""}`],
-                ["history", "History"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => changeTab(id)}
-                className={
-                  "min-w-0 flex-1 rounded-lg px-4 py-2 text-sm font-bold transition lg:flex-none " +
-                  (tab === id
-                    ? "bg-[var(--ink)] text-white"
-                    : "text-[var(--muted)] hover:bg-[var(--soft)]")
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
+      <section className="view-toolbar" aria-label={`${tabTitle} filters`}>
+        <span className="view-count">{visibleStories.length} {visibleStories.length === 1 ? "story" : "stories"}</span>
+        {tab !== "home" && (
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search stories…" aria-label="Search stories" />
+        )}
+        {tab === "history" && (
+          <>
+            <input type="date" value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} aria-label="Filter history by exact publication date" />
+            <select value={historyRange} onChange={(event) => setHistoryRange(event.target.value as HistoryRange)} aria-label="History timeframe">
+              <option value="2d">Last 2 days</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All history</option>
+            </select>
+          </>
+        )}
+        {tab === "home" && dismissed.length > 0 && (
+          <button className="text-action" onClick={restoreDismissed}>Restore dismissed ({dismissed.length})</button>
+        )}
+      </section>
 
-          <div className="flex items-center gap-2">
-            <span className="rounded-full border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs font-bold">
-              {usingLive ? "LIVE" : dataMode === "live" ? "DEMO FALLBACK" : "DEMO"}
-            </span>
-          </div>
-        </header>
-
-        <section className="mb-3 flex min-h-10 flex-wrap items-center justify-between gap-2">
-          <div>
-            <span className="font-black">{tabTitle}</span>
-            <span className="ml-2 text-sm text-[var(--muted)]">
-              {visibleStories.length} {visibleStories.length === 1 ? "story" : "stories"}
-            </span>
-          </div>
-
-          <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
-            {tab !== "home" && (
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search title, place, category…"
-                className="min-w-[220px] rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--ink)]"
-              />
-            )}
-            {tab === "history" && (
-              <>
-                <input
-                  type="date"
-                  value={historyDate}
-                  onChange={(event) => setHistoryDate(event.target.value)}
-                  className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold outline-none"
-                  aria-label="Filter history by exact publication date"
-                />
-                <select
-                  value={historyRange}
-                  onChange={(event) => setHistoryRange(event.target.value as HistoryRange)}
-                  className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold outline-none"
-                >
-                  <option value="2d">Last 2 days</option>
-                  <option value="7d">Last 7 days</option>
-                  <option value="30d">Last 30 days</option>
-                  <option value="all">All history</option>
-                </select>
-              </>
-            )}
-            {tab === "home" && dismissed.length > 0 && (
-              <button
-                onClick={restoreDismissed}
-                className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold"
-              >
-                Restore dismissed ({dismissed.length})
-              </button>
-            )}
-          </div>
-        </section>
-
-        <section className="grid gap-3 lg:grid-cols-[340px_minmax(0,1fr)]">
-          <aside className="abs-card overflow-hidden rounded-2xl">
-            <div className="border-b border-[var(--line)] px-4 py-3">
-              <div className="abs-mono text-[10px] text-[var(--muted)]">
-                {tab === "home"
-                  ? "48-hour feed"
-                  : tab === "favorites"
-                    ? "saved stories"
-                    : "permanent archive"}
-              </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">
-                {tab === "home" ? "Swipe left or use × to dismiss." : "Tap a title to read."}
-              </div>
-            </div>
-
-            <div className="abs-scrollbar story-list overflow-y-auto">
-              {visibleStories.length ? (
-                visibleStories.map((story) => {
-                  const isSelected = selected.id === story.id;
-                  const isFavorite = favorites.includes(story.id);
-
-                  return (
-                    <div
-                      key={story.id}
-                      onPointerDown={(event) => onStoryPointerDown(story.id, event)}
-                      onPointerUp={(event) => onStoryPointerUp(story.id, event)}
-                      className={
-                        "group border-b border-[var(--line)] last:border-b-0 " +
-                        (isSelected ? "bg-[var(--soft)]" : "bg-[var(--paper)] hover:bg-[#f8f8f5]")
-                      }
-                    >
-                      <button
-                        onClick={() => {
-                          setSelectedId(story.id);
-                          stopNarration();
-                        }}
-                        className="block w-full px-4 pb-2 pt-4 text-left"
-                      >
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <span className="abs-mono text-[10px] text-[var(--accent-dark)]">
-                            #{story.rank} · {story.country}
-                          </span>
-                          <span className="text-[10px] font-bold text-[var(--muted)]">
-                            {formatDate(story.publicationDate)}
-                          </span>
-                        </div>
-                        <h2 className="text-[15px] font-black leading-5 tracking-[-0.02em]">
-                          {story.title}
-                        </h2>
-                      </button>
-
-                      <div className="flex items-center justify-between px-3 pb-3">
-                        <span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-[var(--muted)]">
-                          {story.category}
-                        </span>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => toggleFavorite(story.id)}
-                            className="grid h-8 w-8 place-items-center rounded-lg text-lg hover:bg-white"
-                            aria-label={isFavorite ? "Remove favorite" : "Favorite story"}
-                            title={isFavorite ? "Remove favorite" : "Favorite"}
-                          >
-                            {isFavorite ? "★" : "☆"}
-                          </button>
-                          {tab === "home" && (
-                            <button
-                              onClick={() => dismissStory(story.id)}
-                              className="grid h-8 w-8 place-items-center rounded-lg text-base hover:bg-white"
-                              aria-label="Dismiss story"
-                              title="Dismiss"
-                            >
-                              ×
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="p-6 text-sm leading-6 text-[var(--muted)]">{emptyMessage}</div>
-              )}
-            </div>
-          </aside>
-
-          <article className="abs-card flex min-h-[680px] flex-col overflow-hidden rounded-2xl">
-            <div className="border-b border-[var(--line)] px-5 py-4 md:px-7">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-[var(--ink)] px-3 py-1.5 text-[11px] font-bold text-white">
-                    {selected.country}
-                  </span>
-                  <span className="rounded-full bg-[var(--soft)] px-3 py-1.5 text-[11px] font-bold">
-                    {selected.category}
-                  </span>
-                  <span className="text-xs text-[var(--muted)]">
-                    Published {formatDate(selected.publicationDate, true)}
-                  </span>
-                </div>
-                <button
-                  onClick={() => toggleFavorite(selected.id)}
-                  className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold"
-                >
-                  {favorites.includes(selected.id) ? "★ Favorited" : "☆ Favorite"}
+      <section className="reading-layout" aria-label={tabTitle}>
+        <aside className="story-sidebar" aria-label="Story titles">
+          <div className="story-list abs-scrollbar">
+            {visibleStories.length ? visibleStories.map((story) => (
+              <div key={story.id} className={`story-row ${selected.id === story.id ? "is-selected" : ""}`}
+                onPointerDown={(event) => onStoryPointerDown(story.id, event)} onPointerUp={(event) => onStoryPointerUp(story.id, event)}>
+                <button className="story-title" onClick={() => { setSelectedId(story.id); stopNarration(); }} aria-pressed={selected.id === story.id}>
+                  {story.title}
                 </button>
+                <div className="row-actions">
+                  <button onClick={() => toggleFavorite(story.id)} aria-label={favorites.includes(story.id) ? "Remove favorite" : "Favorite story"} title={favorites.includes(story.id) ? "Remove favorite" : "Favorite"}>
+                    {favorites.includes(story.id) ? "★" : "☆"}
+                  </button>
+                  {tab === "home" && <button onClick={() => dismissStory(story.id)} aria-label="Dismiss story" title="Dismiss">×</button>}
+                </div>
               </div>
-              <h2 className="max-w-5xl text-3xl font-black leading-[1.05] tracking-[-0.045em] md:text-5xl">
-                {selected.title}
-              </h2>
-            </div>
+            )) : <p className="empty-state">{emptyMessage}</p>}
+          </div>
+          <div className="list-navigation">
+            <button onClick={() => selectAdjacent(-1)} disabled={!visibleStories.length}>← Previous</button>
+            <button onClick={() => selectAdjacent(1)} disabled={!visibleStories.length}>Next →</button>
+          </div>
+        </aside>
 
-            <div className="abs-scrollbar reader-scroll flex-1 overflow-y-auto px-5 py-5 md:px-7 md:py-6">
-              <section className="mb-6">
-                <div className="abs-mono text-[10px] text-[var(--muted)]">Sources</div>
-                <div className="mt-2 flex flex-wrap gap-2">
+        <article className="story-reader" aria-label="Selected story">
+          <div className="reader-body abs-scrollbar">
+            {visibleStories.length > 0 ? (
+              <>
+                <div className="story-heading">
+                  <h2>{selected.title}</h2>
+                  <button className="reader-favorite" onClick={() => toggleFavorite(selected.id)} aria-label={favorites.includes(selected.id) ? "Remove selected favorite" : "Favorite selected story"} aria-pressed={favorites.includes(selected.id)} title="Favorite story">
+                    {favorites.includes(selected.id) ? "★" : "☆"}
+                  </button>
+                </div>
+                <p className="story-text">{selected.detailedSummary}</p>
+                <details className="story-details" key={selected.id}>
+                  <summary>Story details</summary>
+                  <dl>
+                    <div><dt>Place</dt><dd>{selected.country} · {selected.region}</dd></div>
+                    <div><dt>Category</dt><dd>{selected.category}</dd></div>
+                    <div><dt>Published</dt><dd>{formatDate(selected.publicationDate, true, hydrated)}</dd></div>
+                    <div><dt>Event date</dt><dd>{formatDate(selected.eventDate, true, hydrated)}</dd></div>
+                    <div><dt>Confidence</dt><dd>{selected.confidence}</dd></div>
+                    <div><dt>Why it was selected</dt><dd>{selected.whyItsWeird}</dd></div>
+                    <div><dt>Verification</dt><dd>{selected.verificationNotes}</dd></div>
+                  </dl>
+                </details>
+              </>
+            ) : <p className="empty-state">{emptyMessage}</p>}
+          </div>
+          <div className="reader-bottom">
+            <div className="source-section" aria-label="Story sources">
+              {visibleStories.length > 0 && <>
+                <span>Sources</span>
+                <div className="source-links abs-scrollbar">
                   {selected.sources.map((source) => (
-                    <a
-                      key={source.url}
-                      href={source.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm font-bold hover:border-[var(--ink)]"
-                    >
-                      {source.publisher} ↗
-                    </a>
+                    <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.publisher} ↗</a>
                   ))}
                 </div>
-              </section>
-
-              <section className="max-w-4xl">
-                <div className="abs-mono text-[10px] text-[var(--muted)]">Story</div>
-                <p className="mt-3 text-lg leading-8 text-[#282823] md:text-xl md:leading-9">
-                  {selected.detailedSummary}
-                </p>
-              </section>
-
-              <section className="mt-8 grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-[var(--line)] p-4">
-                  <div className="abs-mono text-[10px] text-[var(--muted)]">
-                    Why it made the cut
-                  </div>
-                  <p className="mt-2 text-sm font-bold leading-6">{selected.whyItsWeird}</p>
-                </div>
-                <div className="rounded-xl border border-[var(--line)] p-4">
-                  <div className="abs-mono text-[10px] text-[var(--muted)]">Verification</div>
-                  <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                    {selected.verificationNotes}
-                  </p>
-                </div>
-              </section>
-
-              <section className="mt-6 grid gap-3 border-t border-[var(--line)] pt-5 text-sm sm:grid-cols-3">
-                <div>
-                  <div className="text-xs text-[var(--muted)]">Event date</div>
-                  <div className="mt-1 font-bold">{formatDate(selected.eventDate, true)}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-[var(--muted)]">Confidence</div>
-                  <div className="mt-1 font-bold capitalize">{selected.confidence}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-[var(--muted)]">Region</div>
-                  <div className="mt-1 font-bold">{selected.region}</div>
-                </div>
-              </section>
+              </>}
             </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] bg-[var(--paper)] px-4 py-3 md:px-6">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => selectAdjacent(-1)}
-                  disabled={!visibleStories.length}
-                  className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold disabled:opacity-40"
-                >
-                  ← Previous
-                </button>
-                <button
-                  onClick={() => selectAdjacent(1)}
-                  disabled={!visibleStories.length}
-                  className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold disabled:opacity-40"
-                >
-                  Next →
-                </button>
-                {tab === "home" && (
-                  <button
-                    onClick={() => dismissStory(selected.id)}
-                    className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-bold"
-                  >
-                    Dismiss
-                  </button>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={narrate}
-                  className="rounded-xl border border-[var(--line)] px-4 py-3 text-sm font-black"
-                >
-                  {voiceState === "loading"
-                    ? "Preparing…"
-                    : voiceState === "playing"
-                      ? "■ Stop reading"
-                      : "▶ Read aloud"}
-                </button>
-                <button
-                  onClick={listening ? stopHandsFree : startHandsFree}
-                  className={
-                    "rounded-xl px-5 py-3 text-sm font-black text-white " +
-                    (listening ? "bg-[var(--accent)]" : "bg-[var(--ink)]")
-                  }
-                  title={voiceHint}
-                >
-                  {listening ? "● Listening…" : "◉ Talk to Absurdity"}
-                </button>
-              </div>
+            <div className="voice-controls">
+              <button onClick={narrate} disabled={!visibleStories.length} className="read-button">
+                {voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "■ Stop reading" : "▶ Read aloud"}
+              </button>
+              <button onClick={listening ? stopHandsFree : startHandsFree} className={`talk-button ${listening ? "is-listening" : ""}`} title={voiceHint} aria-pressed={listening}>
+                {listening ? "● Listening…" : "◉ Talk to Absurdity"}
+              </button>
             </div>
-          </article>
-        </section>
-
-        <footer className="mt-3 flex flex-col gap-1 px-1 text-xs text-[var(--muted)] md:flex-row md:items-center md:justify-between">
-          <span>
-            {usingLive
-              ? "Live archive loaded. Home only shows stories published in the last 48 hours."
-              : dataMode === "live"
-                ? "Live mode has no promoted stories yet, so the clearly labeled demo corpus remains visible."
-                : "Demo clock follows the newest fixture so the 48-hour feed remains testable."}
-          </span>
-          <span>{voiceHint}</span>
-        </footer>
+          </div>
+        </article>
+      </section>
+      <div className="voice-status" role="status" aria-live="polite">
+        {voiceHint !== "Say “next”, “favorite”, “dismiss”, “read”, “history” or “home”." ? voiceHint : ""}
       </div>
     </main>
   );

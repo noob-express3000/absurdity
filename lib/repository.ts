@@ -172,9 +172,10 @@ export class PersistentStoryRepository implements StoryRepository {
   async getCurrentBriefing(): Promise<Briefing> {
     const database = await getDatabase();
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
     const rows = await database.query<StoryRow>(
-      "SELECT * FROM stories WHERE status = ? AND publication_date >= ? ORDER BY rank ASC, absurdity_score DESC, publication_date DESC LIMIT ?",
-      ["selected", cutoff, 100],
+      "SELECT * FROM stories WHERE status = ? AND publication_date >= ? AND publication_date <= ? ORDER BY rank ASC, absurdity_score DESC, publication_date DESC LIMIT ?",
+      ["selected", cutoff, now, 100],
     );
 
     const stories = await Promise.all(rows.map((row) => this.hydrate(row)));
@@ -235,6 +236,14 @@ export class PersistentStoryRepository implements StoryRepository {
   async upsertStory(story: Story) {
     const database = await getDatabase();
     const now = new Date().toISOString();
+
+    // A weaker recheck must not erase a story from the permanent selected archive.
+    if (story.status !== "selected") {
+      const existing = await database.query<{ status: string }>(
+        "SELECT status FROM stories WHERE id = ?", [story.id],
+      );
+      if (existing[0]?.status === "selected") return;
+    }
 
     await database.execute(
       `INSERT INTO stories (

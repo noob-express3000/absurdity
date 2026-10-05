@@ -3,8 +3,8 @@ import { ElevenLabsVoiceProvider } from "@/lib/providers/voice";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const text = typeof body.text === "string" ? body.text.trim() : "";
+    const body = await request.json().catch(() => null);
+    const text = typeof body?.text === "string" ? body.text.trim() : "";
 
     if (!text) {
       return NextResponse.json({ error: "Text is required." }, { status: 400 });

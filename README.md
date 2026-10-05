@@ -104,7 +104,7 @@ Copy `.env.example` to `.env.local` when configuring providers.
 
 ## Local setup
 
-Requirements: Node.js 20.9+ and npm.
+Requirements: Node.js 22.13+ (including built-in SQLite) and npm. The pinned deployment runtime is in `.node-version`.
 
 ```bash
 npm install
@@ -117,6 +117,7 @@ Useful checks:
 
 ```bash
 npm run typecheck
+npm test
 npm run build
 ```
 
@@ -141,10 +142,10 @@ npm run build
 - service: `absurdity`
 - plan: free by default
 - region: Frankfurt
-- build: `npm install && npm run build`
+- build: `npm ci && npm run build`
 - start: `npm start`
 - health check: `/api/health`
-- default mode: `ABSURDITY_MODE=demo`
+- deployed mode: `ABSURDITY_MODE=live` (local default: demo)
 
 Provider secrets belong in the Render service environment and should never be committed.
 
@@ -161,8 +162,8 @@ Provider secrets belong in the Render service environment and should never be co
 
 The backend now implements the production data seam discussed for Absurdity:
 
-- PostgreSQL when `DATABASE_URL` is configured.
-- Built-in SQLite fallback for local development when `DATABASE_URL` is absent.
+- Turso Cloud when `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are configured.
+- Built-in SQLite fallback for local development when Turso is absent.
 - Automatic SQLite/libSQL schema initialization plus `db/migrations/001_init.sql` as the canonical schema.
 - Permanent story/source/research-run records.
 - `/api/stories` for the current 48-hour briefing or searchable selected-story history.
@@ -180,3 +181,7 @@ For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per da
 Render remains the web host while Turso owns the persistent archive. Both Render and the GitHub Actions research job use the same Turso database, so the free Render filesystem is never treated as durable storage.
 
 The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Groq secrets during deployment.
+
+## Reader layout and QA
+
+The current interface follows the October notebook: story titles, story text, source links along the bottom and read/talk controls. Additional story metadata is behind Story details. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.

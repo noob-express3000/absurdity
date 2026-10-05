@@ -21,6 +21,7 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
       "https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(this.voiceId),
       {
         method: "POST",
+        signal: AbortSignal.timeout(30000),
         headers: {
           "Content-Type": "application/json",
           "xi-api-key": this.apiKey,

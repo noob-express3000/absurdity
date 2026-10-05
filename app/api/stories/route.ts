@@ -10,6 +10,9 @@ export async function GET(request: Request) {
     const scope = url.searchParams.get("scope") || "history";
     const query = url.searchParams.get("q") || "";
     const limit = Number(url.searchParams.get("limit") || 200);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      return NextResponse.json({ error: "Limit must be an integer from 1 to 500." }, { status: 400 });
+    }
 
     if (scope === "home") {
       const briefing = await storyRepository.getCurrentBriefing();
