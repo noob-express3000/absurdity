@@ -27,13 +27,15 @@ The application has three primary tabs:
 
 - **New stories** — stories from the current 48-hour window.
 - **Favorites** — stories the user saved.
-- **History** — the permanent archive with search and timeframe filters.
+- **History** — the permanent archive, navigated and searched through the agent on request.
 
 The main reading layout intentionally stays simple:
 
 1. story-title list on the left;
-2. selected story and source links in the main reading pane;
-3. narration and navigation controls at the bottom.
+2. selected story followed by source links in the main reading pane;
+3. small narration and navigation controls at the bottom.
+
+The whole reader fits one viewport. The title list and article scroll internally. Search and date fields are handled by agent instructions instead of occupying the default interface. If speech recognition is unavailable or microphone access is denied, a compact instruction box appears.
 
 On the New stories tab, a story can be dismissed with the × control or a left swipe. Favorites and dismissed-state currently persist in browser `localStorage`.
 
@@ -47,7 +49,7 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - New stories / Favorites / History navigation
 - 48-hour home-feed rule
 - permanent demo archive view
-- history search and timeframe filtering
+- requested archive search by location, keywords, category and publication date
 - favorites persistence
 - dismissed-story persistence
 - swipe-to-dismiss
@@ -78,6 +80,12 @@ Where the browser exposes the Web Speech recognition API, the interface understa
 - `favorites`
 - `home`
 - `stop listening`
+- `find South African stories`
+- `find animal stories from the last week`
+- `find stories on 2026-10-01`
+- `find animal stories in my favorites`
+
+Navigation searches only stored stories when requested; it does not invoke web research or discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
 
 Narration works independently through ElevenLabs when configured and falls back to browser text-to-speech.
 
@@ -123,7 +131,7 @@ npm run build
 
 ## Architecture
 
-- `app/page.tsx` — reader UI, favorites, dismissals, history filters and hands-free controls
+- `app/page.tsx` — reader UI, favorites, dismissals and agent navigation
 - `app/api/narrate/route.ts` — narration endpoint
 - `app/api/research/route.ts` — lightweight discovery endpoint
 - `app/api/chat/route.ts` — retained grounded-agent seam
@@ -131,6 +139,7 @@ npm run build
 - `lib/demo-data.ts` — seeded demonstration corpus
 - `lib/research.ts` — RSS collection and deterministic triage
 - `lib/agent.ts` — deterministic corpus agent
+- `lib/navigation.ts` — explicit in-app navigation and archive search instructions
 - `lib/providers/intelligence.ts` — optional Groq provider
 - `lib/providers/search.ts` — optional Exa / Tavily provider
 - `lib/providers/voice.ts` — optional ElevenLabs provider
@@ -184,4 +193,4 @@ The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Gr
 
 ## Reader layout and QA
 
-The current interface follows the October notebook: story titles, story text, source links along the bottom and read/talk controls. Additional story metadata is behind Story details. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.
+The current interface follows the October notebook: story titles, story text, source links directly after the article and small read/talk controls, all within a single viewport. Additional story metadata is behind Story details. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.

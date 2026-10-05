@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 const browser = await chromium.launch({headless: true, ...(process.env.QA_CHROMIUM_PATH ? {executablePath:process.env.QA_CHROMIUM_PATH,args:['--no-sandbox','--disable-dev-shm-usage']} : {})});
 const page = await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'Africa/Johannesburg'});
 const errors=[]; page.on('pageerror', e=>errors.push(e.message));
+const researchRequests=[]; page.on('request', r=>{if(r.url().includes('/api/research')) researchRequests.push(r.url());});
 await page.addInitScript(() => {
   class Recognition { start(){window.qaRecognition=this;} stop(){} }
   window.SpeechRecognition=Recognition;
@@ -17,7 +18,7 @@ const command = async text => { await page.evaluate(text=>window.qaRecognition.o
 const archiveLoaded = page.waitForResponse(r=>r.url().includes('/api/stories'));
 await page.goto(baseUrl);
 await archiveLoaded;
-await page.getByRole('button',{name:'Next →',exact:true}).waitFor();
+await page.getByRole('button',{name:'Next story',exact:true}).waitFor();
 const storyTitle=()=>page.locator('article h2').innerText();
 const first=await storyTitle();
 await page.getByRole('button',{name:'Talk to Absurdity'}).click();
@@ -32,20 +33,33 @@ await page.getByRole('button',{name:/^Favorites/}).click();
 await page.waitForFunction(title=>document.querySelector('article h2')?.textContent===title,third);
 assert.equal(await storyTitle(),third);
 await page.getByRole('button',{name:'History',exact:true}).click();
-await page.getByRole('textbox',{name:'Search stories'}).fill('South Africa');
+assert.equal(await page.getByRole('textbox',{name:'Search stories'}).count(),0);
+await page.getByRole('button',{name:'Talk to Absurdity'}).click();
+const search = async text => {
+  const response=page.waitForResponse(r=>r.url().includes('/api/stories?') && r.url().includes('q='));
+  await command(text); await response;
+  await page.waitForFunction(()=>window.qaSaid.length>0);
+  await command('stop');
+};
+await search('find South African stories');
 assert.match(await page.locator('aside').innerText(),/Goat walks into/);
-await page.getByRole('textbox',{name:'Search stories'}).fill('no-results-ever');
+await search('find no-results-ever');
 await page.getByText('No archived stories match this search and timeframe.').first().waitFor();
 assert.match(await page.locator('aside').innerText(),/No archived stories/);
+await search('show older animal stories');
+await page.getByText('No archived stories match this search and timeframe.').first().waitFor();
+await search('find animal stories in my favorites');
+assert.equal(await storyTitle(),third);
+await command('stop listening');
 await page.getByRole('button',{name:'New stories',exact:true}).click();
-const before=await page.getByRole('button',{name:'Dismiss story',exact:true}).count();
+const before=await page.locator('.story-row').count();
 await page.getByRole('button',{name:'Dismiss story',exact:true}).first().click();
-assert.equal(await page.getByRole('button',{name:'Dismiss story',exact:true}).count(),before-1);
+assert.equal(await page.locator('.story-row').count(),before-1);
 await page.reload();
 await page.getByRole('button',{name:/Restore dismissed/}).waitFor();
-assert.equal(await page.getByRole('button',{name:'Dismiss story',exact:true}).count(),before-1);
+assert.equal(await page.locator('.story-row').count(),before-1);
 await page.getByRole('button',{name:/Restore dismissed/}).click();
-assert.equal(await page.getByRole('button',{name:'Dismiss story',exact:true}).count(),before);
+assert.equal(await page.locator('.story-row').count(),before);
 await page.getByRole('button',{name:'Read aloud'}).click();
 await page.waitForFunction(()=>window.qaSaid.length>0);
 await page.getByRole('button',{name:'Stop reading'}).click();
@@ -56,6 +70,15 @@ await page.getByRole('button',{name:'Preparing…'}).click();
 await page.waitForTimeout(500);
 assert.equal(await page.evaluate(()=>window.qaSaid.length),saidBefore);
 assert.equal(await page.locator('a[target="_blank"]').count()>0,true);
+assert.equal(await page.evaluate(()=>document.querySelector('.story-text')?.nextElementSibling?.classList.contains('source-section')),true);
+for (const viewport of [{width:1366,height:768},{width:1280,height:720},{width:360,height:640},{width:844,height:390}]) {
+  await page.setViewportSize(viewport);
+  const bounds=await page.evaluate(()=>({width:document.documentElement.scrollWidth,height:document.documentElement.scrollHeight,viewportWidth:innerWidth,viewportHeight:innerHeight}));
+  assert.ok(bounds.width<=bounds.viewportWidth && bounds.height<=bounds.viewportHeight,JSON.stringify(bounds));
+  await page.getByRole('button',{name:'Talk to Absurdity'}).scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(()=>document.scrollingElement.scrollTop),0);
+}
+await page.setViewportSize({width:1366,height:768});
 if (screenshotDir) { await mkdir(screenshotDir,{recursive:true}); await page.screenshot({path:screenshotDir+'/desktop.png',fullPage:true}); }
 await page.setViewportSize({width:360,height:800});
 await page.getByRole('button',{name:'History',exact:true}).click();
@@ -64,6 +87,11 @@ if (screenshotDir) await page.screenshot({path:screenshotDir+'/mobile.png',fullP
 await page.getByRole('button',{name:'Talk to Absurdity'}).click();
 await page.evaluate(()=>{window.qaRecognition.onerror({error:'not-allowed'});window.qaRecognition.onend();});
 await page.getByRole('button',{name:'Talk to Absurdity'}).waitFor();
+await page.getByRole('textbox',{name:'Ask Absurdity to navigate'}).fill('open history');
+await page.getByRole('button',{name:'Send instruction'}).click();
+assert.equal(await page.locator('nav button[aria-current]').innerText(),'History');
+await page.getByRole('button',{name:'Close instruction box'}).click();
+assert.deepEqual(researchRequests,[]);
 assert.deepEqual(errors,[]);
-console.log('PASS desktop/mobile, repeated voice navigation, favorites command, storage reload, search, dismiss/restore, source links, speech fallback, cancel-pending narration, no page errors');
+console.log('PASS single-page laptop/phone/landscape layout, inline sources, requested archive search only, voice navigation, favorites, storage reload, dismiss/restore, speech fallback, cancel-pending narration, microphone denial with typed navigation, no page errors');
 await browser.close();

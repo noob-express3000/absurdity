@@ -93,7 +93,14 @@ test('persistent stories roundtrip with sources and research, retain old history
   assert.equal((await repository.getStory(recent.id))?.summary, 'Updated story');
   assert.deepEqual((await repository.getCurrentBriefing()).stories.map(story=>story.id), [recent.id]);
   assert.equal((await repository.searchStories('')).length, 3);
+  assert.deepEqual((await repository.searchStories('animal Australia',500,{before:'2021-01-01T00:00:00.000Z'})).map(story=>story.id),[old.id]);
+  assert.equal((await repository.searchStories('%')).length,0);
   assert.equal(await repository.getStory('missing'), null);
+});
+test('archive validates date filters and applies them before limiting results', async () => {
+  assert.equal((await storiesGet(new Request('http://localhost/api/stories?from=invalid'))).status,400);
+  const result = await (await storiesGet(new Request('http://localhost/api/stories?before=2020-01-01T00:00:00.000Z'))).json();
+  assert.equal(result.stories.length,0);
 });
 test('weaker reanalysis preserves previously selected archive entries and evidence', async () => {
   const repository = new PersistentStoryRepository();

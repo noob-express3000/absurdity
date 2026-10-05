@@ -6,8 +6,10 @@ import type { Briefing, ResearchStep, Story, StorySource } from "./types";
 export interface StoryRepository {
   getCurrentBriefing(): Promise<Briefing>;
   getStory(id: string): Promise<Story | null>;
-  searchStories(query: string, limit?: number): Promise<Story[]>;
+  searchStories(query: string, limit?: number, dates?: ArchiveDates): Promise<Story[]>;
 }
+
+export type ArchiveDates = { from?: string; before?: string };
 
 export type ResearchRunRecord = {
   id?: string;
@@ -115,10 +117,10 @@ export class DemoStoryRepository implements StoryRepository {
     return demoBriefing.stories.find((story) => story.id === id) ?? null;
   }
 
-  async searchStories(query: string, limit = 200) {
-    const needle = query.trim().toLowerCase();
-    const matches = needle
-      ? demoBriefing.stories.filter((story) =>
+  async searchStories(query: string, limit = 200, dates: ArchiveDates = {}) {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = demoBriefing.stories.filter((story) => {
+      const haystack =
           [
             story.title,
             story.summary,
@@ -128,10 +130,11 @@ export class DemoStoryRepository implements StoryRepository {
             story.tags.join(" "),
           ]
             .join(" ")
-            .toLowerCase()
-            .includes(needle),
-        )
-      : demoBriefing.stories;
+            .toLowerCase();
+      return terms.every((term) => haystack.includes(term)) &&
+        (!dates.from || Date.parse(story.publicationDate) >= Date.parse(dates.from)) &&
+        (!dates.before || Date.parse(story.publicationDate) < Date.parse(dates.before));
+    });
 
     return matches.slice(0, limit);
   }
@@ -204,31 +207,21 @@ export class PersistentStoryRepository implements StoryRepository {
     return rows[0] ? this.hydrate(rows[0]) : null;
   }
 
-  async searchStories(query: string, limit = 200) {
+  async searchStories(query: string, limit = 200, dates: ArchiveDates = {}) {
     const database = await getDatabase();
-    const needle = "%" + query.trim().toLowerCase() + "%";
     const safeLimit = Math.max(1, Math.min(limit, 500));
-
-    const rows = query.trim()
-      ? await database.query<StoryRow>(
-          `SELECT * FROM stories
-           WHERE status = 'selected'
-             AND (
-               LOWER(title) LIKE ?
-               OR LOWER(summary) LIKE ?
-               OR LOWER(category) LIKE ?
-               OR LOWER(country) LIKE ?
-               OR LOWER(region) LIKE ?
-               OR LOWER(tags_json) LIKE ?
-             )
-           ORDER BY publication_date DESC, rank ASC
-           LIMIT ?`,
-          [needle, needle, needle, needle, needle, needle, safeLimit],
-        )
-      : await database.query<StoryRow>(
-          "SELECT * FROM stories WHERE status = ? ORDER BY publication_date DESC, rank ASC LIMIT ?",
-          ["selected", safeLimit],
-        );
+    const clauses = ["status = 'selected'"];
+    const args: (string | number)[] = [];
+    for (const term of query.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+      clauses.push("LOWER(title || ' ' || summary || ' ' || category || ' ' || country || ' ' || region || ' ' || tags_json) LIKE ? ESCAPE '\\'");
+      args.push("%" + term.replace(/[\\%_]/g, "\\$&") + "%");
+    }
+    if (dates.from) { clauses.push("julianday(publication_date) >= julianday(?)"); args.push(dates.from); }
+    if (dates.before) { clauses.push("julianday(publication_date) < julianday(?)"); args.push(dates.before); }
+    const rows = await database.query<StoryRow>(
+      `SELECT * FROM stories WHERE ${clauses.join(" AND ")} ORDER BY julianday(publication_date) DESC, rank ASC LIMIT ?`,
+      [...args, safeLimit],
+    );
 
     return Promise.all(rows.map((row) => this.hydrate(row)));
   }

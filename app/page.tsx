@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { demoBriefing } from "@/lib/demo-data";
 import type { Story } from "@/lib/types";
+import { parseNavigation } from "@/lib/navigation";
 
 type Tab = "home" | "favorites" | "history";
-type HistoryRange = "2d" | "7d" | "30d" | "all";
 type VoiceState = "idle" | "loading" | "playing";
 
 const FAVORITES_KEY = "absurdity:favorites:v1";
@@ -41,25 +41,6 @@ function formatDate(value: string, includeTime = false, clientReady = false) {
   }
 }
 
-function storyMatches(story: Story, query: string) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-
-  return [
-    story.title,
-    story.shortTitle,
-    story.summary,
-    story.detailedSummary,
-    story.country,
-    story.region,
-    story.category,
-    story.tags.join(" "),
-  ]
-    .join(" ")
-    .toLowerCase()
-    .includes(needle);
-}
-
 function demoClock() {
   if (demoBriefing.mode !== "demo") return Date.now();
   return Math.max(...demoBriefing.stories.map((story) => new Date(story.publicationDate).getTime()));
@@ -74,9 +55,9 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState(demoBriefing.stories[0].id);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
-  const [query, setQuery] = useState("");
-  const [historyRange, setHistoryRange] = useState<HistoryRange>("all");
-  const [historyDate, setHistoryDate] = useState("");
+  const [searchResults, setSearchResults] = useState<Story[] | null>(null);
+  const [showAgentPrompt, setShowAgentPrompt] = useState(false);
+  const [agentPrompt, setAgentPrompt] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [listening, setListening] = useState(false);
@@ -87,6 +68,7 @@ export default function Home() {
   const keepListeningRef = useRef(false);
   const commandHandlerRef = useRef<(command: string) => void>(() => {});
   const narrationRequestRef = useRef(0);
+  const navigationRequestRef = useRef(0);
   const audioUrlRef = useRef<string | null>(null);
   const gestureRef = useRef<{ id: string; x: number } | null>(null);
 
@@ -145,6 +127,7 @@ export default function Home() {
       recognitionRef.current?.stop?.();
       audioRef.current?.pause();
       narrationRequestRef.current += 1;
+      navigationRequestRef.current += 1;
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
       window.speechSynthesis?.cancel();
     };
@@ -166,33 +149,12 @@ export default function Home() {
     [favorites, stories],
   );
 
-  const historyStories = useMemo(() => {
-    let filtered = stories;
+  const baseStories = tab === "home" ? homeStories : tab === "favorites" ? favoriteStories : stories;
+  const visibleStories = searchResults
+    ? tab === "favorites" ? searchResults.filter((story) => favorites.includes(story.id)) : searchResults
+    : baseStories;
 
-    if (historyRange !== "all") {
-      const days = historyRange === "2d" ? 2 : historyRange === "7d" ? 7 : 30;
-      const cutoff = anchorTime - days * 24 * 60 * 60 * 1000;
-      filtered = filtered.filter((story) => new Date(story.publicationDate).getTime() >= cutoff);
-    }
-
-    if (historyDate) {
-      filtered = filtered.filter(
-        (story) => new Date(story.publicationDate).toISOString().slice(0, 10) === historyDate,
-      );
-    }
-
-    return filtered;
-  }, [anchorTime, historyDate, historyRange, stories]);
-
-  const baseStories =
-    tab === "home" ? homeStories : tab === "favorites" ? favoriteStories : historyStories;
-
-  const visibleStories = useMemo(
-    () => baseStories.filter((story) => storyMatches(story, query)),
-    [baseStories, query],
-  );
-
-  const selected = stories.find((story) => story.id === selectedId) ?? stories[0];
+  const selected = visibleStories.find((story) => story.id === selectedId) ?? visibleStories[0] ?? stories[0];
 
   useEffect(() => {
     if (visibleStories.length && !visibleStories.some((story) => story.id === selectedId)) {
@@ -202,6 +164,7 @@ export default function Home() {
 
   function stopNarration() {
     narrationRequestRef.current += 1;
+    navigationRequestRef.current += 1;
     audioRef.current?.pause();
     audioRef.current = null;
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
@@ -319,22 +282,56 @@ export default function Home() {
     setListening(false);
   }
 
+  async function searchArchive(instruction: Extract<ReturnType<typeof parseNavigation>, { action: "search" }>) {
+    stopNarration();
+    const requestId = ++navigationRequestRef.current;
+    setVoiceHint("Looking in your saved archive…");
+    const params = new URLSearchParams({ scope: "history", q: instruction.query, limit: "500" });
+    if (instruction.from) params.set("from", instruction.from);
+    if (instruction.before) params.set("before", instruction.before);
+    try {
+      const response = await fetch(`/api/stories?${params}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Archive unavailable");
+      const payload = await response.json();
+      if (requestId !== navigationRequestRef.current) return;
+      if (!Array.isArray(payload.stories)) throw new Error("Invalid archive response");
+      const matches: Story[] = instruction.view === "favorites"
+        ? payload.stories.filter((story: Story) => favorites.includes(story.id))
+        : payload.stories;
+      if (payload.mode === "live") {
+        setRemoteStories((current) => Array.from(new Map([...(current ?? []), ...matches].map((story) => [story.id, story])).values()));
+      }
+      setTab(instruction.view);
+      setSearchResults(matches);
+      if (matches.length) setSelectedId(matches[0].id);
+      const reply = matches.length
+        ? `Found ${matches.length}${matches.length === 500 ? " or more" : ""} ${matches.length === 1 ? "story" : "stories"} in your archive. ${matches[0].title}. Say read or next.`
+        : "No saved stories match that request. Say history to see the archive again.";
+      setVoiceHint(reply);
+      browserSpeak(reply);
+    } catch {
+      if (requestId !== navigationRequestRef.current) return;
+      const reply = "I couldn't open the saved archive. Please try again.";
+      setVoiceHint(reply);
+      browserSpeak(reply);
+    }
+  }
+
   function handleVoiceCommand(raw: string) {
-    const command = raw.toLowerCase();
+    const instruction = parseNavigation(raw, tab, usingLive ? Date.now() : anchorTime);
     setVoiceHint(`Heard: “${raw}”`);
-
-    if (command.includes("next")) return selectAdjacent(1);
-    if (command.includes("previous") || command.includes("back")) return selectAdjacent(-1);
-    if (command.includes("favorites")) return changeTab("favorites");
-    if (command.includes("favorite") || command.includes("save")) return toggleFavorite(selected.id);
-    if (command.includes("dismiss") || command.includes("skip")) return dismissStory(selected.id);
-    if (command.includes("read") || command.includes("speak")) return void narrate();
-    if (command.includes("history")) return changeTab("history");
-    if (command.includes("home") || command.includes("new stories")) return changeTab("home");
-    if (command.includes("stop listening")) return stopHandsFree();
-    if (command.includes("stop")) return stopNarration();
-
-    setVoiceHint("Command not recognized. Try next, previous, favorite, dismiss, read, history or home.");
+    switch (instruction.action) {
+      case "view": return changeTab(instruction.view);
+      case "next": return selectAdjacent(1);
+      case "previous": return selectAdjacent(-1);
+      case "favorite": if (visibleStories.length) toggleFavorite(selected.id); return;
+      case "dismiss": if (visibleStories.length) dismissStory(selected.id); return;
+      case "read": if (visibleStories.length) void narrate(); return;
+      case "stop-listening": return stopHandsFree();
+      case "stop": return stopNarration();
+      case "search": return void searchArchive(instruction);
+      default: setVoiceHint("Try next, read, favorites, history, or find South African stories.");
+    }
   }
 
   useEffect(() => {
@@ -346,7 +343,8 @@ export default function Home() {
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setVoiceHint("Hands-free navigation is not supported by this browser.");
+      setVoiceHint("Voice navigation is unavailable here. Type an instruction instead.");
+      setShowAgentPrompt(true);
       return;
     }
 
@@ -363,6 +361,7 @@ export default function Home() {
       if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)) {
         keepListeningRef.current = false;
         setListening(false);
+        setShowAgentPrompt(true);
       }
       if (event?.error !== "no-speech") {
         setVoiceHint(`Voice navigation error: ${event?.error ?? "unknown error"}.`);
@@ -388,6 +387,7 @@ export default function Home() {
       keepListeningRef.current = false;
       recognitionRef.current = null;
       setVoiceHint("Voice navigation could not start. Please try again.");
+      setShowAgentPrompt(true);
       return;
     }
     setListening(true);
@@ -395,8 +395,9 @@ export default function Home() {
   }
 
   function changeTab(nextTab: Tab) {
+    navigationRequestRef.current += 1;
     setTab(nextTab);
-    setQuery("");
+    setSearchResults(null);
     stopNarration();
   }
 
@@ -415,39 +416,21 @@ export default function Home() {
   return (
     <main className="reader-app">
       <header className="app-header">
-        <button className="brand" onClick={() => changeTab("home")} aria-label="Absurdity home">
+        <button className="brand" onClick={() => changeTab("home")} aria-label="New stories" title="New stories">
           <span className="brand-icon" aria-hidden="true">A</span>
-          <h1>Absurdity</h1>
+          <h1 className="sr-only">Absurdity</h1>
         </button>
         <nav className="tabs" aria-label="Story views">
-          {([ ["home", "New stories"], ["favorites", "Favorites"], ["history", "History"] ] as const).map(([id, label]) => (
+          {([ ["favorites", "Favorites"], ["history", "History"] ] as const).map(([id, label]) => (
             <button key={id} onClick={() => changeTab(id)} aria-current={tab === id ? "page" : undefined}>
-              {label}{id === "favorites" && favorites.length > 0 ? ` (${favorites.length})` : ""}
+              {label}
             </button>
           ))}
         </nav>
         <span className="data-mode" title={usingLive ? "Live story archive" : "These stories are demonstration fixtures"}>
-          {usingLive ? "Live" : dataMode === "live" ? "Demo fallback" : "Demo"}
+          {usingLive ? "" : "Demo"}
         </span>
       </header>
-
-      <section className="view-toolbar" aria-label={`${tabTitle} filters`}>
-        <span className="view-count">{visibleStories.length} {visibleStories.length === 1 ? "story" : "stories"}</span>
-        {tab !== "home" && (
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search stories…" aria-label="Search stories" />
-        )}
-        {tab === "history" && (
-          <>
-            <input type="date" value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} aria-label="Filter history by exact publication date" />
-            <select value={historyRange} onChange={(event) => setHistoryRange(event.target.value as HistoryRange)} aria-label="History timeframe">
-              <option value="2d">Last 2 days</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All history</option>
-            </select>
-          </>
-        )}
-        {tab === "home" && dismissed.length > 0 && (
-          <button className="text-action" onClick={restoreDismissed}>Restore dismissed ({dismissed.length})</button>
-        )}
-      </section>
 
       <section className="reading-layout" aria-label={tabTitle}>
         <aside className="story-sidebar" aria-label="Story titles">
@@ -468,8 +451,9 @@ export default function Home() {
             )) : <p className="empty-state">{emptyMessage}</p>}
           </div>
           <div className="list-navigation">
-            <button onClick={() => selectAdjacent(-1)} disabled={!visibleStories.length}>← Previous</button>
-            <button onClick={() => selectAdjacent(1)} disabled={!visibleStories.length}>Next →</button>
+            {tab === "home" && dismissed.length > 0 && <button className="restore-action" onClick={restoreDismissed} aria-label={`Restore dismissed (${dismissed.length})`}>Restore</button>}
+            <button onClick={() => selectAdjacent(-1)} disabled={!visibleStories.length} aria-label="Previous story" title="Previous">←</button>
+            <button onClick={() => selectAdjacent(1)} disabled={!visibleStories.length} aria-label="Next story" title="Next">→</button>
           </div>
         </aside>
 
@@ -479,11 +463,16 @@ export default function Home() {
               <>
                 <div className="story-heading">
                   <h2>{selected.title}</h2>
-                  <button className="reader-favorite" onClick={() => toggleFavorite(selected.id)} aria-label={favorites.includes(selected.id) ? "Remove selected favorite" : "Favorite selected story"} aria-pressed={favorites.includes(selected.id)} title="Favorite story">
-                    {favorites.includes(selected.id) ? "★" : "☆"}
-                  </button>
                 </div>
                 <p className="story-text">{selected.detailedSummary}</p>
+                <div className="source-section" aria-label="Story sources">
+                  <span>Sources</span>
+                  <div className="source-links">
+                    {selected.sources.map((source) => (
+                      <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.publisher} ↗</a>
+                    ))}
+                  </div>
+                </div>
                 <details className="story-details" key={selected.id}>
                   <summary>Story details</summary>
                   <dl>
@@ -500,22 +489,17 @@ export default function Home() {
             ) : <p className="empty-state">{emptyMessage}</p>}
           </div>
           <div className="reader-bottom">
-            <div className="source-section" aria-label="Story sources">
-              {visibleStories.length > 0 && <>
-                <span>Sources</span>
-                <div className="source-links abs-scrollbar">
-                  {selected.sources.map((source) => (
-                    <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.publisher} ↗</a>
-                  ))}
-                </div>
-              </>}
-            </div>
+            {showAgentPrompt && <form className="agent-prompt" onSubmit={(event) => { event.preventDefault(); handleVoiceCommand(agentPrompt); setAgentPrompt(""); }}>
+              <p role="status">{voiceHint}</p>
+              <div><input aria-label="Ask Absurdity to navigate" placeholder="Find stories, open history…" value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
+            </form>}
+
             <div className="voice-controls">
-              <button onClick={narrate} disabled={!visibleStories.length} className="read-button">
-                {voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "■ Stop reading" : "▶ Read aloud"}
+              <button onClick={narrate} disabled={!visibleStories.length} className="read-button" aria-label={voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud">
+                {voiceState === "loading" ? "…" : voiceState === "playing" ? "■" : "▶"}
               </button>
-              <button onClick={listening ? stopHandsFree : startHandsFree} className={`talk-button ${listening ? "is-listening" : ""}`} title={voiceHint} aria-pressed={listening}>
-                {listening ? "● Listening…" : "◉ Talk to Absurdity"}
+              <button onClick={listening ? stopHandsFree : startHandsFree} className={`talk-button ${listening ? "is-listening" : ""}`} title={voiceHint} aria-label={listening ? "Stop listening" : "Talk to Absurdity"} aria-pressed={listening}>
+                {listening ? "●" : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M8 21h8"/></svg>}
               </button>
             </div>
           </div>

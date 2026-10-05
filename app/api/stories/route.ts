@@ -13,6 +13,11 @@ export async function GET(request: Request) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
       return NextResponse.json({ error: "Limit must be an integer from 1 to 500." }, { status: 400 });
     }
+    const from = url.searchParams.get("from") || undefined;
+    const before = url.searchParams.get("before") || undefined;
+    if ([from, before].some((date) => date && !Number.isFinite(Date.parse(date)))) {
+      return NextResponse.json({ error: "Archive dates must be valid timestamps." }, { status: 400 });
+    }
 
     if (scope === "home") {
       const briefing = await storyRepository.getCurrentBriefing();
@@ -25,7 +30,10 @@ export async function GET(request: Request) {
       });
     }
 
-    const stories = await storyRepository.searchStories(query, limit);
+    const stories = await storyRepository.searchStories(query, limit, {
+      from: from ? new Date(from).toISOString() : undefined,
+      before: before ? new Date(before).toISOString() : undefined,
+    });
     return NextResponse.json({
       mode: process.env.ABSURDITY_MODE === "live" ? "live" : "demo",
       stories,

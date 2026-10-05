@@ -2,16 +2,16 @@
 
 ## Product layout
 
-The October notebook defines a simple interface: New stories, Favorites and History; a scrollable title list beside a scrollable story; source links along the bottom; and a speak button for navigation. The homepage covers the current 48 hours, with older stories retained in History.
+The October notebook defines a simple interface: New stories, Favorites and History; a scrollable title list beside a scrollable story; source links after the article; and a speak button for navigation. The homepage covers the current 48 hours, with older stories retained in History.
 
-The reader now follows that layout. Per-story category badges, ranked metadata, repeated instructions, large verification cards and the promotional subtitle have been removed from the default view. Dates, place, category, selection reasoning and verification remain accessible under Story details. Sources and read/talk controls remain visible while the story scrolls. On phones the title list sits above the reading pane within the viewport.
+The reader now follows that layout. Per-story category badges, ranked metadata, repeated instructions, large verification cards and the promotional subtitle have been removed from the default view. Dates, place, category, selection reasoning and verification remain accessible under Story details. Source links follow the article inside the scrolling reading pane. Small read/talk controls stay at its bottom-right. Manual search/date fields, story counts and repeated favorite controls have been removed. Requested navigation instructions search stored stories; they never invoke discovery. A compact typed instruction box appears only when speech recognition is unavailable or microphone access is denied. On phones the title list sits above the reading pane within the viewport.
 
 ## Verified
 
 - Production build and TypeScript.
-- 13 automated regressions: archive/search, API validation, demo grounding, narration fallback, healthy and degraded database readiness, SQLite story/source/research persistence, 48-hour and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures.
-- Browser checks at 1440×1000 and 360×800 in Africa/Johannesburg: repeated voice next commands, favorite/favorites distinction, favorite and dismissal reload persistence, search, dismiss/restore, source links, browser speech fallback, cancellation during narration preparation and microphone denial.
-- No page errors or horizontal mobile overflow in those browser checks.
+- 17 automated regressions: archive/search with combined criteria and date bounds, navigation parsing, Johannesburg publication days, API validation, demo grounding, narration fallback, healthy and degraded database readiness, SQLite story/source/research persistence, 48-hour and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures.
+- Browser checks at 1366×768, 1280×720, 360×640, 360×800 and 844×390 in Africa/Johannesburg: repeated voice next commands, favorite/favorites distinction, favorite and dismissal reload persistence, requested geography/category/older/favorites search, typed navigation after microphone denial, dismiss/restore, source links, browser speech fallback, cancellation during narration preparation and microphone denial.
+- No page errors, page-level scrolling or horizontal overflow in those browser checks.
 
 Speech recognition and synthesis were stubbed for repeatable control tests. Real microphone recognition and audible playback still require device testing. Live Groq/ElevenLabs/Turso calls, the deployed Render URL, and actual scheduled RSS research were not exercised with production credentials.
 
