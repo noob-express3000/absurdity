@@ -13,7 +13,7 @@ The reader now follows that layout. Per-story category badges, ranked metadata, 
 - Browser checks at 1366×768, 1280×720, 360×640, 360×800 and 844×390 in Africa/Johannesburg: repeated voice next commands, favorite/favorites distinction, favorite and dismissal reload persistence, requested geography/category/older/favorites search, typed navigation after microphone denial, dismiss/restore, source links, browser speech fallback, cancellation during narration preparation, conversational context, microphone pause/resume, echo suppression and cancellation of pending conversation actions.
 - No page errors, page-level scrolling or horizontal overflow in those browser checks.
 
-Speech recognition and synthesis were stubbed for repeatable control tests. Real microphone recognition and audible playback still require device testing. Live Groq/ElevenLabs/Turso calls, the deployed Render URL, and actual scheduled RSS research were not exercised with production credentials.
+Speech recognition and synthesis were stubbed for repeatable control tests. Real microphone recognition and audible playback still require device testing. The deployed Render reader was checked on 2026-10-05 after main commit `2ffbfaf`: the new typed control sends a conversation request, reports that Groq is not configured, and requested South African archive search selects the matching fixture in History. `GROQ_API_KEY` is missing from the deployed service, so a real Groq conversation remains blocked until it is set. Real ElevenLabs/Turso calls and scheduled RSS research were not exercised with production credentials.
 
 ## Run checks
 
@@ -44,3 +44,5 @@ Run against a separate demo database and demo server. The script changes only it
 ![Desktop reader](reader-desktop.png)
 
 ![Phone reader](reader-mobile.png)
+
+![Deployed conversation with missing-key fallback](reader-voice-live.jpg)
