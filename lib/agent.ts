@@ -133,7 +133,7 @@ export function answerFromCorpus(message: string, storyId?: string): AgentReply 
     };
   }
 
-  if (input.includes("go deeper") || input.includes("tell me more")) {
+  if (input.includes("go deeper") || input.includes("tell me more") || input.includes("tell me about this story")) {
     return {
       text: current.detailedSummary,
       storyId: current.id,
@@ -160,8 +160,9 @@ export function answerFromCorpus(message: string, storyId?: string): AgentReply 
   }
 
   return {
-    text: "I already have " + demoBriefing.stats.selected + " selected stories in this seeded briefing. Ask for the weirdest one, Africa, animals, something harmless, a numbered story, sources, verification, or a deep dive.",
+    text: "I couldn’t answer that from the demo stories.",
     storyId: current.id,
     intent: "help",
   };
 }
+
