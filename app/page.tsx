@@ -23,24 +23,6 @@ function parseStoredIds(key: string) {
   }
 }
 
-function formatDate(value: string, includeTime = false, clientReady = false) {
-  try {
-    // SSR and the first client render must agree before applying browser locale/timezone.
-    if (!clientReady) {
-      const iso = new Date(value).toISOString();
-      return includeTime ? iso.slice(0, 16).replace("T", " ") + " UTC" : iso.slice(0, 10);
-    }
-    return new Intl.DateTimeFormat("en", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      ...(includeTime ? { hour: "2-digit", minute: "2-digit" } : {}),
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
 function demoClock() {
   if (demoBriefing.mode !== "demo") return Date.now();
   return Math.max(...demoBriefing.stories.map((story) => new Date(story.publicationDate).getTime()));
@@ -473,18 +455,6 @@ export default function Home() {
                     ))}
                   </div>
                 </div>
-                <details className="story-details" key={selected.id}>
-                  <summary>Story details</summary>
-                  <dl>
-                    <div><dt>Place</dt><dd>{selected.country} · {selected.region}</dd></div>
-                    <div><dt>Category</dt><dd>{selected.category}</dd></div>
-                    <div><dt>Published</dt><dd>{formatDate(selected.publicationDate, true, hydrated)}</dd></div>
-                    <div><dt>Event date</dt><dd>{formatDate(selected.eventDate, true, hydrated)}</dd></div>
-                    <div><dt>Confidence</dt><dd>{selected.confidence}</dd></div>
-                    <div><dt>Why it was selected</dt><dd>{selected.whyItsWeird}</dd></div>
-                    <div><dt>Verification</dt><dd>{selected.verificationNotes}</dd></div>
-                  </dl>
-                </details>
               </>
             ) : <p className="empty-state">{emptyMessage}</p>}
           </div>

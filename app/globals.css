@@ -38,11 +38,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .source-links { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .source-links a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .source-links a:hover { color: var(--ink); }
-.story-details { max-width: 760px; margin-top: 14px; color: var(--muted); font-size: 11px; }
-.story-details summary { width: fit-content; cursor: pointer; }
-.story-details dl { margin: 12px 0 0; font-size: 12px; line-height: 1.65; }
-.story-details dl > div { display: grid; grid-template-columns: 110px 1fr; padding: 4px 0; gap: 12px; }
-.story-details dd { margin: 0; color: var(--ink); }
 .reader-bottom { position: absolute; bottom: 10px; right: 12px; background: var(--paper); }
 .agent-prompt { width: min(300px, calc(100vw - 60px)); padding: 10px; margin-bottom: 8px; border: 1px solid var(--line); background: var(--paper); }
 .agent-prompt p { margin: 0 0 8px; font-size: 11px; color: var(--muted); }
@@ -69,7 +64,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .reader-body { padding: 18px 16px 56px; }
   .story-heading h2 { font-size: 19px; }
   .story-text { font-size: 14px; line-height: 1.7; margin-top: 16px; }
-  .story-details dl > div { grid-template-columns: 1fr; gap: 0; }
   .source-section { margin-top: 18px; }
 }
 @media (max-height: 450px) and (min-width: 641px) { .app-header { height: 36px; } .reader-body { padding-top: 16px; } }

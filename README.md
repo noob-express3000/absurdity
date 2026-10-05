@@ -55,7 +55,6 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - swipe-to-dismiss
 - original-source links
 - event/publication date separation
-- story verification notes
 - ElevenLabs narration route with browser speech fallback
 - optional browser speech-recognition commands for hands-free navigation
 - lightweight RSS discovery endpoint
@@ -193,4 +192,4 @@ The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Gr
 
 ## Reader layout and QA
 
-The current interface follows the October notebook: story titles, story text, source links directly after the article and small read/talk controls, all within a single viewport. Additional story metadata is behind Story details. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.
+The current interface follows the October notebook: story titles, story text, source links directly after the article and small read/talk controls, all within a single viewport. The reader shows only the story title, article, source links and essential controls. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.
