@@ -7,8 +7,9 @@ import {
   GroqIntelligenceProvider,
 } from "./providers/intelligence";
 import { getSearchProvider } from "./providers/search";
-import { recordResearchRun, saveStories } from "./repository";
-import type { Story, StorySource } from "./types";
+import { recordResearchRun, saveStories, saveStoryEvidence } from "./repository";
+import { ingestSource, type PageLoader } from "./articles";
+import type { IngestedEvidence, Story, StorySource } from "./types";
 
 type CandidateGroup = {
   candidates: DiscoveredCandidate[];
@@ -154,7 +155,10 @@ function makeStoryId(group: CandidateGroup) {
   return "live-" + hash(canonical || normalizedTitle(group.primary.title));
 }
 
-export async function runDailyResearch() {
+export async function runDailyResearch(options: {
+  discover?: typeof runLightweightDiscovery;
+  loadArticle?: PageLoader;
+} = {}) {
   const startedAt = new Date();
   const runId = randomUUID();
   const windowHours = Math.max(24, Number(process.env.RESEARCH_WINDOW_HOURS || 30));
@@ -167,6 +171,9 @@ export async function runDailyResearch() {
     searchQueries: 0,
     groq: false,
     groqAnalyses: 0,
+    articlesAttempted: 0,
+    articlesExtracted: 0,
+    articleFallbacks: 0,
   };
 
   await recordResearchRun({
@@ -183,7 +190,7 @@ export async function runDailyResearch() {
   });
 
   try {
-    const discovery = await runLightweightDiscovery();
+    const discovery = await (options.discover ?? runLightweightDiscovery)();
     failures.push(...discovery.failures.map((publisher) => "RSS: " + publisher));
 
     const inWindow = discovery.candidates.filter((candidate) => {
@@ -204,14 +211,17 @@ export async function runDailyResearch() {
     const intelligence = new GroqIntelligenceProvider();
     providerUsage.groq = intelligence.available();
     const stories: Story[] = [];
+    const evidenceByStory = new Map<string, IngestedEvidence[]>();
+    const articleCache = new Map<string, Promise<IngestedEvidence>>();
 
     for (const group of groups) {
       const primary = group.primary;
-      const rssEvidence: CandidateEvidence[] = group.candidates.map((candidate) => ({
+      const rssEvidence: CandidateEvidence[] = [primary, ...group.candidates.filter(candidate => candidate !== primary)].map((candidate) => ({
         publisher: candidate.publisher,
         title: candidate.title,
         url: normalizeUrl(candidate.url),
         text: candidate.snippet,
+        kind: "rss",
         publishedAt: candidate.publishedAt,
       }));
 
@@ -225,6 +235,7 @@ export async function runDailyResearch() {
             title: hit.title,
             url: normalizeUrl(hit.url),
             text: hit.text,
+            kind: "search",
           }));
         } catch (error) {
           failures.push(
@@ -233,12 +244,38 @@ export async function runDailyResearch() {
         }
       }
 
-      const allEvidence = [
+      const discoveredEvidence = [
         ...rssEvidence,
         ...searchEvidence.filter(
           (item) => !rssEvidence.some((source) => normalizeUrl(source.url) === normalizeUrl(item.url)),
         ),
       ];
+
+      // Fetch only the strongest shortlist sources, once per URL in this run.
+      const allEvidence: IngestedEvidence[] = await Promise.all(discoveredEvidence.map(async (source, index) => {
+        if (index >= 3) {
+          const text = source.text ?? '';
+          return {...source, text, resolvedUrl:source.url, fetchedAt:startedAt.toISOString(),
+            status:text ? 'excerpt' as const : 'unavailable' as const, method:source.kind === 'search' ? 'search' as const : 'rss' as const,
+            originalLength:text.length, truncated:false, contentHash:createHash('sha256').update(text).digest('hex')};
+        }
+        let pending = articleCache.get(source.url);
+        if (!pending) {
+          providerUsage.articlesAttempted += 1;
+          pending = ingestSource(source, options.loadArticle).then(item => {
+            if (item.status === 'article') providerUsage.articlesExtracted += 1;
+            else providerUsage.articleFallbacks += 1;
+            return item;
+          });
+          articleCache.set(source.url, pending);
+        }
+        const retrieved = await pending;
+        return {...retrieved, publisher:source.publisher, publishedAt:source.publishedAt ?? retrieved.publishedAt};
+      }));
+      const extracted = allEvidence.filter(item => item.status === 'article').length;
+      for (const item of allEvidence) {
+        if (item.error) failures.push('Article: ' + item.url + ': ' + item.error);
+      }
 
       let analysis: CandidateAnalysis;
       if (intelligence.available()) {
@@ -311,6 +348,12 @@ export async function runDailyResearch() {
         status: canPromote ? "selected" : analysis.confidence === "low" ? "candidate" : "verified",
         research: [
           {
+            label: "Article extraction",
+            detail: `${extracted} readable article body/bodies extracted; ${allEvidence.length - extracted} excerpt or unavailable source(s).`,
+            status: extracted ? "complete" : "warning",
+            at: currentClock(),
+          },
+          {
             label: "Discovered",
             detail:
               group.candidates.length +
@@ -347,6 +390,7 @@ export async function runDailyResearch() {
       };
 
       stories.push(story);
+      evidenceByStory.set(story.id, allEvidence);
     }
 
     const selected = stories
@@ -358,6 +402,7 @@ export async function runDailyResearch() {
     });
 
     await saveStories(stories);
+    for (const story of stories) await saveStoryEvidence(story.id, evidenceByStory.get(story.id) ?? []);
 
     const completedAt = new Date();
     await recordResearchRun({
@@ -402,3 +447,4 @@ export async function runDailyResearch() {
     throw error;
   }
 }
+

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "./database";
 import { demoBriefing } from "./demo-data";
-import type { Briefing, ResearchStep, Story, StorySource } from "./types";
+import type { Briefing, ResearchStep, Story, StorySource, IngestedEvidence } from "./types";
 
 export interface StoryRepository {
   getCurrentBriefing(): Promise<Briefing>;
@@ -387,3 +387,36 @@ export const storyRepository: StoryRepository =
   process.env.ABSURDITY_MODE === "live"
     ? new PersistentStoryRepository()
     : new DemoStoryRepository();
+
+// Full source bodies stay out of the public reader payloads.
+export async function saveStoryEvidence(storyId: string, evidence: IngestedEvidence[]) {
+  const database = await getDatabase();
+  for (const item of evidence) {
+    await database.execute(`INSERT INTO story_evidence (
+      story_id, url, publisher, title, resolved_url, published_at, fetched_at, status,
+      method, body_text, original_length, truncated, content_hash, error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(story_id, url) DO UPDATE SET
+      publisher = excluded.publisher, title = excluded.title, resolved_url = excluded.resolved_url,
+      published_at = excluded.published_at, fetched_at = excluded.fetched_at, status = excluded.status,
+      method = excluded.method, body_text = excluded.body_text, original_length = excluded.original_length,
+      truncated = excluded.truncated, content_hash = excluded.content_hash, error = excluded.error
+    WHERE story_evidence.status != 'article' OR (excluded.status = 'article' AND (story_evidence.truncated = 1 OR excluded.truncated = 0))`,
+    [storyId, item.url, item.publisher, item.title, item.resolvedUrl, item.publishedAt ?? null,
+      item.fetchedAt, item.status, item.method, item.text, item.originalLength, item.truncated ? 1 : 0,
+      item.contentHash, item.error ?? null]);
+  }
+}
+
+export async function getStoryEvidence(storyId: string): Promise<IngestedEvidence[]> {
+  const database = await getDatabase();
+  const rows = await database.query<{
+    url:string; publisher:string; title:string; resolved_url:string; published_at:string|null;
+    fetched_at:string; status:IngestedEvidence['status']; method:IngestedEvidence['method']; body_text:string;
+    original_length:number; truncated:number; content_hash:string; error:string|null;
+  }>('SELECT * FROM story_evidence WHERE story_id = ? ORDER BY url', [storyId]);
+  return rows.map(row => ({url:row.url, publisher:row.publisher, title:row.title, resolvedUrl:row.resolved_url,
+    ...(row.published_at ? {publishedAt:row.published_at} : {}), fetchedAt:row.fetched_at, status:row.status,
+    method:row.method, text:row.body_text, originalLength:Number(row.original_length), truncated:Boolean(row.truncated),
+    contentHash:row.content_hash, ...(row.error ? {error:row.error} : {})}));
+}

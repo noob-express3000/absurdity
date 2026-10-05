@@ -60,3 +60,20 @@ export type Briefing = {
   };
   stories: Story[];
 };
+
+
+export type IngestedEvidence = {
+  publisher: string;
+  title: string;
+  url: string;
+  resolvedUrl: string;
+  text: string;
+  publishedAt?: string;
+  fetchedAt: string;
+  status: "article" | "excerpt" | "unavailable";
+  method: "readability" | "rss" | "search";
+  originalLength: number;
+  truncated: boolean;
+  contentHash: string;
+  error?: string;
+};

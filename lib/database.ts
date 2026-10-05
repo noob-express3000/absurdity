@@ -53,6 +53,24 @@ const schemaStatements = [
     PRIMARY KEY (story_id, url),
     FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS story_evidence (
+    story_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    publisher TEXT NOT NULL,
+    title TEXT NOT NULL,
+    resolved_url TEXT NOT NULL,
+    published_at TEXT,
+    fetched_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    method TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    original_length INTEGER NOT NULL,
+    truncated INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    error TEXT,
+    PRIMARY KEY (story_id, url),
+    FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE
+  )`,
   `CREATE TABLE IF NOT EXISTS research_steps (
     story_id TEXT NOT NULL,
     ordinal INTEGER NOT NULL,
@@ -195,3 +213,4 @@ export async function databaseStatus() {
     };
   }
 }
+

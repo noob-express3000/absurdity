@@ -96,7 +96,7 @@ The play button or `read` reads the selected title and article through ElevenLab
 
 The live system now has a real persisted pipeline:
 
-`DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
+`DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → EXTRACT ARTICLES → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
 
 `/api/research` remains the cheap RSS preview endpoint. The heavier scheduled pipeline lives in `lib/pipeline.ts` and runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; Groq is used only after deterministic filtering and clustering.
 
@@ -115,7 +115,7 @@ Copy `.env.example` to `.env.local` when configuring providers.
 
 ## Local setup
 
-Requirements: Node.js 22.13+ (including built-in SQLite) and npm. The pinned deployment runtime is in `.node-version`.
+Requirements: Node.js 22.22.2+ (including built-in SQLite) and npm. The pinned deployment runtime is in `.node-version`.
 
 ```bash
 npm install
@@ -146,6 +146,14 @@ npm run build
 - `lib/providers/intelligence.ts` — optional Groq provider
 - `lib/providers/search.ts` — optional Exa / Tavily provider
 - `lib/providers/voice.ts` — optional ElevenLabs provider
+
+## Full article ingestion
+
+Daily research now retrieves up to three source pages per shortlisted story and uses Mozilla Readability to extract the readable article body. Scripts and remote page assets never run. Requests allow only public HTTP(S) addresses, validate and pin DNS addresses for each redirect, and enforce a 12-second deadline, four redirects and a 2 MiB HTML limit.
+
+Full extracted text is stored in `story_evidence` alongside publisher, requested/final URLs, publication/retrieval timestamps, extraction status and a SHA-256 content hash. The reader APIs return summaries and source links without shipping full evidence bodies for every archived story. Bodies over 120,000 characters are explicitly marked as clipped; model evidence has a shared 24,000-character budget with separate clipping markers. Ordinary article bodies that fit are sent in full, replacing the former 1,600-character per-source cap.
+
+Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research, never automatically from reader navigation. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
 
 ## Render deployment
 
