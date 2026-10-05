@@ -46,3 +46,7 @@ Run against a separate demo database and demo server. The script changes only it
 ![Phone reader](reader-mobile.png)
 
 ![Deployed conversation with missing-key fallback](reader-voice-live.jpg)
+
+The deployed empty chatbox was verified after the descriptor cleanup; actual replies remain visible.
+
+![Chatbox without descriptors](reader-chat-empty.jpg)
