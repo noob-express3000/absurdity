@@ -425,17 +425,17 @@ export default function Home() {
                 </button>
                 <div className="row-actions">
                   <button onClick={() => toggleFavorite(story.id)} aria-label={favorites.includes(story.id) ? "Remove favorite" : "Favorite story"} title={favorites.includes(story.id) ? "Remove favorite" : "Favorite"}>
-                    {favorites.includes(story.id) ? "★" : "☆"}
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill={favorites.includes(story.id) ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L3 9.6l6.2-.9L12 3Z"/></svg>
                   </button>
-                  {tab === "home" && <button onClick={() => dismissStory(story.id)} aria-label="Dismiss story" title="Dismiss">×</button>}
+                  {tab === "home" && <button onClick={() => dismissStory(story.id)} aria-label="Dismiss story" title="Dismiss"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button>}
                 </div>
               </div>
             )) : <p className="empty-state">{emptyMessage}</p>}
           </div>
           <div className="list-navigation">
             {tab === "home" && dismissed.length > 0 && <button className="restore-action" onClick={restoreDismissed} aria-label={`Restore dismissed (${dismissed.length})`}>Restore</button>}
-            <button onClick={() => selectAdjacent(-1)} disabled={!visibleStories.length} aria-label="Previous story" title="Previous">←</button>
-            <button onClick={() => selectAdjacent(1)} disabled={!visibleStories.length} aria-label="Next story" title="Next">→</button>
+            <button onClick={() => selectAdjacent(-1)} disabled={!visibleStories.length} aria-label="Previous story" title="Previous"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6"/></svg></button>
+            <button onClick={() => selectAdjacent(1)} disabled={!visibleStories.length} aria-label="Next story" title="Next"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
           </div>
         </aside>
 
@@ -466,7 +466,7 @@ export default function Home() {
 
             <div className="voice-controls">
               <button onClick={narrate} disabled={!visibleStories.length} className="read-button" aria-label={voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud">
-                {voiceState === "loading" ? "…" : voiceState === "playing" ? "■" : "▶"}
+                {voiceState === "loading" ? <svg className="loading-ring" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : voiceState === "playing" ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.8c0-.7.8-1.1 1.4-.7l10 6.2a.8.8 0 0 1 0 1.4l-10 6.2c-.6.4-1.4 0-1.4-.7V5.8Z"/></svg>}
               </button>
               <button onClick={listening ? stopHandsFree : startHandsFree} className={`talk-button ${listening ? "is-listening" : ""}`} title={voiceHint} aria-label={listening ? "Stop listening" : "Talk to Absurdity"} aria-pressed={listening}>
                 {listening ? "●" : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M8 21h8"/></svg>}
