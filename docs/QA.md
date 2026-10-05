@@ -9,7 +9,7 @@ The reader now follows that layout. Per-story category badges, ranked metadata, 
 ## Verified
 
 - Production build and TypeScript.
-- 33 automated regressions: archive/search with combined criteria and date bounds, navigation parsing, Johannesburg publication days, API validation, demo grounding, narration fallback, healthy and degraded database readiness, SQLite story/source/research persistence, 48-hour and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures, structured conversation plans, article/history context, rejection of invented actions/IDs, exclusion of reasoning text, actual archive result counts and safe live fallback.
+- 39 automated regressions: archive/search with combined criteria and date bounds, navigation parsing, Johannesburg publication days, API validation, demo grounding, narration fallback, healthy and degraded database readiness, SQLite story/source/research persistence, 48-hour and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures, structured conversation plans, article/history context, rejection of invented actions/IDs, exclusion of reasoning text, actual archive result counts and safe live fallback.
 - Browser checks at 1366×768, 1280×720, 360×640, 360×800 and 844×390 in Africa/Johannesburg: repeated voice next commands, favorite/favorites distinction, favorite and dismissal reload persistence, requested geography/category/older/favorites search, typed navigation after microphone denial, dismiss/restore, source links, browser speech fallback, cancellation during narration preparation, conversational context, microphone pause/resume, echo suppression and cancellation of pending conversation actions.
 - No page errors, page-level scrolling or horizontal overflow in those browser checks.
 
@@ -31,6 +31,7 @@ For the optional browser regression script, install Playwright locally without c
 npm install --no-save --package-lock=false playwright
 npx playwright install chromium
 node tests/browser-smoke.mjs
+node tests/browser-research.mjs
 ```
 
 Run against a separate demo database and demo server. The script changes only its fresh browser profile. Set `QA_BASE_URL` for a different server, `QA_CHROMIUM_PATH` for an existing Chromium executable, and optionally `QA_SCREENSHOT_DIR` to capture screenshots.
@@ -52,3 +53,9 @@ The deployed empty chatbox was verified after the descriptor cleanup; actual rep
 ![Chatbox without descriptors](reader-chat-empty.jpg)
 
 Full article ingestion checks cover paragraph/tail retention, publisher character encoding, removal of scripts and page chrome, restricted-page fallback, unsafe hosts and redirects, byte/type/deadline limits, native socket address pinning, full-body persistence, preservation after weaker rechecks, bounded model text and the complete discovery → extraction → analysis → storage path. A real ABC source retrieval was attempted here but DNS returned `EAI_AGAIN`; production publisher retrieval is not claimed as verified by this workspace check.
+
+## App-icon fetch cycle
+
+The icon now explicitly starts the full discovery/extraction/analysis/persistence pipeline. Unit checks cover concurrent manual claims, overlap prevention with the daily job, completion and shared cooldown, failed-feed discovery, stale-run recovery, lease ownership, cross-site rejection and joining an active cycle. Browser checks with deterministic API responses verify double-click suppression, the loading indicator, refreshed story content, terminal failure, start failure, resuming after reload without another POST, and the single-page layout. Existing voice/navigation regressions still pass; only the explicit icon click starts research. Production build and all 39 automated tests pass.
+
+The latest scheduled research run observed on 2026-10-05 was skipped (GitHub run 37296353210); the schedule is conditional on `ENABLE_DAILY_RESEARCH=true`. This change does not enable it. The current page is not a real-time feed. A fetch cycle runs in the web process and can be interrupted by a deployment/restart; expired runs are recoverable after 30 minutes. Live publisher/provider calls are separate from the mocked browser verification.

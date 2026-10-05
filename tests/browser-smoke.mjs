@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 const browser = await chromium.launch({headless: true, ...(process.env.QA_CHROMIUM_PATH ? {executablePath:process.env.QA_CHROMIUM_PATH,args:['--no-sandbox','--disable-dev-shm-usage']} : {})});
 const page = await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'Africa/Johannesburg'});
 const errors=[]; page.on('pageerror', e=>errors.push(e.message));
-const researchRequests=[]; page.on('request', r=>{if(r.url().includes('/api/research')) researchRequests.push(r.url());});
+const researchRequests=[]; page.on('request', r=>{if(r.url().includes('/api/research') && r.method()==='POST') researchRequests.push(r.url());});
+await page.route('**/api/research*', route => route.fulfill({json:{run:null}}));
 await page.addInitScript(() => {
   class Recognition { start(){window.qaRecognition=this;window.qaRecognitionStarts=(window.qaRecognitionStarts||0)+1;} stop(){queueMicrotask(()=>this.onend?.());} }
   window.SpeechRecognition=Recognition;
@@ -102,7 +103,9 @@ assert.equal(await page.locator('nav button[aria-current]').innerText(),'History
 await page.unroute('**/api/chat');
 await command('stop listening');
 if (await page.getByRole('button',{name:'Dismiss reply'}).count()) await page.getByRole('button',{name:'Dismiss reply'}).click();
+await page.route('**/api/research*', route => route.fulfill({json:{run:{id:'qa-fetch',status:'complete',selected:0},started:false}}));
 await page.getByRole('button',{name:'New stories',exact:true}).click();
+await page.getByText('Stories refreshed. A new fetch is available in a few minutes.').waitFor();
 const before=await page.locator('.story-row').count();
 await page.getByRole('button',{name:'Dismiss story',exact:true}).first().click();
 assert.equal(await page.locator('.story-row').count(),before-1);
@@ -142,7 +145,7 @@ await page.getByRole('textbox',{name:'Ask Absurdity to navigate'}).fill('open hi
 await page.getByRole('button',{name:'Send instruction'}).click();
 assert.equal(await page.locator('nav button[aria-current]').innerText(),'History');
 await page.getByRole('button',{name:'Close instruction box'}).click();
-assert.deepEqual(researchRequests,[]);
+assert.equal(researchRequests.length,1);
 assert.deepEqual(errors,[]);
 console.log('PASS conversation context, pause/resume, echo suppression, cancel-pending conversation, single-page laptop/phone/landscape layout, inline sources, requested archive search only, voice navigation, favorites, storage reload, dismiss/restore, speech fallback, cancel-pending narration, microphone denial with typed navigation, no page errors');
 await browser.close();

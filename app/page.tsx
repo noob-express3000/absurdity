@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { demoBriefing } from "@/lib/demo-data";
 import type { Story } from "@/lib/types";
 import { parseNavigation } from "@/lib/navigation";
 import type { ConversationTurn } from "@/lib/conversation";
+import type { ResearchCycle } from "@/lib/research-cycle";
 import type { VoiceReply } from "@/lib/voice-agent";
 
 type Tab = "home" | "favorites" | "history";
@@ -48,7 +49,13 @@ export default function Home() {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [listening, setListening] = useState(false);
   const [voiceHint, setVoiceHint] = useState("");
-  const anchorTime = useMemo(() => (usingLive ? Date.now() : demoClock()), [usingLive]);
+  const [fetching, setFetching] = useState(false);
+  const [cycleId, setCycleId] = useState<string | null>(null);
+  const [fetchHint, setFetchHint] = useState("");
+  const fetchBusyRef = useRef(false);
+  const archiveRequestRef = useRef(0);
+  const fetchControllerRef = useRef<AbortController | null>(null);
+  const anchorTime = useMemo(() => (usingLive ? Date.now() : demoClock()), [usingLive, remoteStories]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const keepListeningRef = useRef(false);
@@ -68,36 +75,96 @@ export default function Home() {
     setHydrated(true);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    fetch("/api/stories?scope=history&limit=500", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Story archive request failed.");
-        return response.json();
-      })
-      .then((payload) => {
-        if (cancelled) return;
-        const mode = payload?.mode === "live" ? "live" : "demo";
-        setDataMode(mode);
-
-        if (mode === "live" && Array.isArray(payload?.stories) && payload.stories.length) {
-          setRemoteStories(payload.stories as Story[]);
-          setSelectedId((current) =>
-            payload.stories.some((story: Story) => story.id === current)
-              ? current
-              : payload.stories[0].id,
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setDataMode("demo");
-      });
-
-    return () => {
-      cancelled = true;
-    };
+  const reloadArchive = useCallback(async (signal?: AbortSignal) => {
+    const requestId = ++archiveRequestRef.current;
+    const response = await fetch("/api/stories?scope=history&limit=500", { cache: "no-store", signal });
+    if (!response.ok) throw new Error("Could not refresh stories.");
+    const payload = await response.json();
+    if (signal?.aborted || requestId !== archiveRequestRef.current) return;
+    const mode = payload?.mode === "live" ? "live" : "demo";
+    setDataMode(mode);
+    if (mode === "live" && Array.isArray(payload?.stories)) {
+      setRemoteStories(payload.stories as Story[]);
+      if (payload.stories.length) setSelectedId(current =>
+        payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
+    }
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void reloadArchive(controller.signal).catch(() => {});
+    // Resume an existing cycle after a reload; reading status never starts research.
+    void fetch("/api/research", { cache: "no-store", signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(payload => {
+        if (!controller.signal.aborted && payload?.run?.status === "running") {
+          fetchBusyRef.current = true;
+          setFetching(true);
+          setCycleId(payload.run.id);
+        }
+      }).catch(() => {});
+    return () => { controller.abort(); fetchControllerRef.current?.abort(); };
+  }, [reloadArchive]);
+
+  useEffect(() => {
+    if (!cycleId) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    let failures = 0;
+    async function check() {
+      try {
+        const response = await fetch(`/api/research?id=${encodeURIComponent(cycleId!)}`,
+          { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("Could not check the fetch cycle.");
+        const { run }: { run: ResearchCycle | null } = await response.json();
+        if (controller.signal.aborted) return;
+        if (!run) throw new Error("Fetch cycle unavailable.");
+        if (run.status === "running") { failures = 0; timer = setTimeout(check, 2500); return; }
+        if (run.status === "failed") { failures = 3; throw new Error("Fetch interrupted. Try again shortly."); }
+        await reloadArchive(controller.signal);
+        if (!controller.signal.aborted) setFetchHint("Stories refreshed.");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (++failures < 3) { timer = setTimeout(check, 4000); return; }
+        setFetchHint(error instanceof Error ? error.message : "Fetch failed. Try again shortly.");
+      }
+      if (!controller.signal.aborted) {
+        fetchBusyRef.current = false;
+        setFetching(false);
+        setCycleId(null);
+      }
+    }
+    void check();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [cycleId, reloadArchive]);
+
+  useEffect(() => {
+    if (!fetchHint) return;
+    const timer = setTimeout(() => setFetchHint(""), 8000);
+    return () => clearTimeout(timer);
+  }, [fetchHint]);
+
+  async function fetchStories() {
+    changeTab("home");
+    if (fetchBusyRef.current) return;
+    fetchBusyRef.current = true;
+    setFetching(true);
+    setFetchHint("");
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
+    try {
+      const response = await fetch("/api/research", { method: "POST", signal: controller.signal });
+      const payload = await response.json();
+      if (!response.ok || !payload.run) throw new Error(payload.error || "Could not start a fetch cycle.");
+      if (payload.run.status === "running") { setCycleId(payload.run.id); return; }
+      await reloadArchive(controller.signal);
+      setFetchHint(payload.run.status === "failed" ? "Fetch interrupted. Try again shortly."
+        : "Stories refreshed. A new fetch is available in a few minutes.");
+    } catch (error) {
+      if (!controller.signal.aborted) setFetchHint(error instanceof Error ? error.message : "Fetch failed.");
+    }
+    if (!controller.signal.aborted) { fetchBusyRef.current = false; setFetching(false); }
+  }
 
   useEffect(() => {
     try {
@@ -467,8 +534,8 @@ export default function Home() {
   return (
     <main className="reader-app">
       <header className="app-header">
-        <button className="brand" onClick={() => changeTab("home")} aria-label="New stories" aria-current={tab === "home" ? "page" : undefined} title="New stories">
-          <span className="brand-icon" aria-hidden="true">A</span>
+        <button className="brand" onClick={fetchStories} aria-label="New stories" aria-busy={fetching} aria-current={tab === "home" ? "page" : undefined} title={fetching ? "Fetching stories…" : "Fetch new stories"}>
+          <span className="brand-icon" aria-hidden="true">{fetching ? <svg className="loading-ring" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : "A"}</span>
           <h1 className="brand-name">Absurdity</h1>
         </button>
         <nav className="tabs" aria-label="Story views">
@@ -547,8 +614,9 @@ export default function Home() {
           </div>
         </article>
       </section>
+      {fetchHint && <div className="fetch-notice" role="status">{fetchHint}</div>}
       <div className="voice-status" role="status" aria-live="polite">
-        {voiceHint}
+        {fetching ? "Fetching stories." : voiceHint}
       </div>
     </main>
   );

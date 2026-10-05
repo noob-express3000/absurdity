@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { DiscoveredCandidate } from "./research";
 import { runLightweightDiscovery } from "./research";
 import {
@@ -9,6 +9,7 @@ import {
 import { getSearchProvider } from "./providers/search";
 import { recordResearchRun, saveStories, saveStoryEvidence } from "./repository";
 import { ingestSource, type PageLoader } from "./articles";
+import { claimResearch, releaseResearch } from "./research-cycle";
 import type { IngestedEvidence, Story, StorySource } from "./types";
 
 type CandidateGroup = {
@@ -155,12 +156,30 @@ function makeStoryId(group: CandidateGroup) {
   return "live-" + hash(canonical || normalizedTitle(group.primary.title));
 }
 
-export async function runDailyResearch(options: {
+type ResearchOptions = {
   discover?: typeof runLightweightDiscovery;
   loadArticle?: PageLoader;
-} = {}) {
+  runId?: string;
+};
+
+export async function runDailyResearch(options: ResearchOptions = {}) {
+  const claim = options.runId ? { acquired: true, run: { id: options.runId } }
+    : await claimResearch(false);
+  if (!claim.acquired || !claim.run) return { skipped: true, run: claim.run };
+  try {
+    return await executeResearch({ ...options, runId: claim.run.id });
+  } finally {
+    await releaseResearch(claim.run.id);
+  }
+}
+
+async function executeResearch(options: {
+  discover?: typeof runLightweightDiscovery;
+  loadArticle?: PageLoader;
+  runId: string;
+}) {
   const startedAt = new Date();
-  const runId = randomUUID();
+  const runId = options.runId;
   const windowHours = Math.max(24, Number(process.env.RESEARCH_WINDOW_HOURS || 30));
   const maxCandidates = Math.max(1, Math.min(30, Number(process.env.RESEARCH_MAX_CANDIDATES || 12)));
   const windowStart = new Date(startedAt.getTime() - windowHours * 60 * 60 * 1000);
@@ -192,6 +211,7 @@ export async function runDailyResearch(options: {
   try {
     const discovery = await (options.discover ?? runLightweightDiscovery)();
     failures.push(...discovery.failures.map((publisher) => "RSS: " + publisher));
+    if (discovery.scanned === 0 && discovery.failures.length) throw new Error("No news feeds could be fetched.");
 
     const inWindow = discovery.candidates.filter((candidate) => {
       if (!candidate.publishedAt) return true;

@@ -98,7 +98,11 @@ The live system now has a real persisted pipeline:
 
 `DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → EXTRACT ARTICLES → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
 
-`/api/research` remains the cheap RSS preview endpoint. The heavier scheduled pipeline lives in `lib/pipeline.ts` and runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; Groq is used only after deterministic filtering and clustering.
+Clicking the app icon calls `POST /api/research` to start the full pipeline from `lib/pipeline.ts`. The response returns immediately; the icon spins while the reader polls `GET /api/research?id=…` and reloads the archive on completion. Reloading the page resumes an active cycle without launching another. Navigation and voice archive searches never initiate discovery.
+
+A shared database lease prevents duplicate manual cycles and overlap with `npm run research:daily`. Manual starts have a five-minute shared cooldown. Background work uses Next.js `after()` on the Render Node server; a service restart can interrupt it, and a stale run becomes failed/retryable after 30 minutes. This is not a durable queue or continuous real-time news stream. The page fetches its archive on load and after a tracked cycle finishes; it does not continuously watch for externally saved stories.
+
+The scheduled pipeline also runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; Groq is used only after deterministic filtering and clustering.
 
 ## Optional providers
 
@@ -136,7 +140,7 @@ npm run build
 
 - `app/page.tsx` — reader UI, favorites, dismissals and agent navigation
 - `app/api/narrate/route.ts` — narration endpoint
-- `app/api/research/route.ts` — lightweight discovery endpoint
+- `app/api/research/route.ts` — manual research trigger and cycle status
 - `app/api/chat/route.ts` — retained grounded-agent seam
 - `lib/types.ts` — story and briefing domain model
 - `lib/demo-data.ts` — seeded demonstration corpus
@@ -153,7 +157,7 @@ Daily research now retrieves up to three source pages per shortlisted story and 
 
 Full extracted text is stored in `story_evidence` alongside publisher, requested/final URLs, publication/retrieval timestamps, extraction status and a SHA-256 content hash. The reader APIs return summaries and source links without shipping full evidence bodies for every archived story. Bodies over 120,000 characters are explicitly marked as clipped; model evidence has a shared 24,000-character budget with separate clipping markers. Ordinary article bodies that fit are sent in full, replacing the former 1,600-character per-source cap.
 
-Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research, never automatically from reader navigation. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
+Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research and explicit app-icon fetch cycles. Reader navigation never starts research. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
 
 ## Render deployment
 
@@ -196,7 +200,7 @@ Run the deep pipeline manually with:
 npm run research:daily
 ```
 
-For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as repository secrets. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
+For zero-idle-cost scheduling, `.github/workflows/research.yml` is scheduled for 03:17 UTC (05:17 Johannesburg) once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as repository secrets. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
 
 Render remains the web host while Turso owns the persistent archive. Both Render and the GitHub Actions research job use the same Turso database, so the free Render filesystem is never treated as durable storage.
 

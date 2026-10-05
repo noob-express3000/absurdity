@@ -95,6 +95,12 @@ const schemaStatements = [
     provider_usage_json TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS research_lease (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    run_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    next_manual_at INTEGER NOT NULL
+  )`,
   "CREATE INDEX IF NOT EXISTS idx_stories_publication_date ON stories(publication_date)",
   "CREATE INDEX IF NOT EXISTS idx_stories_status_date ON stories(status, publication_date)",
   "CREATE INDEX IF NOT EXISTS idx_stories_country ON stories(country)",

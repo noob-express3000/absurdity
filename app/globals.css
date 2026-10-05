@@ -114,3 +114,5 @@ button { transition: color 140ms ease, background-color 140ms ease; }
 .agent-reply button { color: var(--muted); flex-shrink: 0; }
 .type-button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--muted); }
 .type-button:hover, .type-button[aria-expanded="true"] { background: var(--soft); color: var(--accent); }
+
+.fetch-notice { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); color: var(--muted); font-size: 12px; box-shadow: 0 5px 22px #27203912; z-index: 5; }

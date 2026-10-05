@@ -87,6 +87,7 @@ test('daily research extracts before analysis and persists full bodies with sour
       return Response.json({output_text:JSON.stringify({selected:true,confidence:'high',summary:'The robot was returned safely.',detailedSummary:'Its sensor was replaced and it returned to the park.',corroboratingUrls:[source.url],country:'Testland'})});
     };
     const result = await runDailyResearch({loadArticle:async url=>({html,url}),discover:async()=>({scanned:1,unusualCandidates:1,failures:[],note:'Fixture discovery',candidates:[{...source,snippet:source.text,publishedAt:new Date().toISOString(),localScore:28}]})});
+    assert.ok("selected" in result);
     assert.equal(result.selected,1);
     assert.equal(result.providerUsage.articlesExtracted,1);
     assert.equal(analysisCalls,1);
@@ -101,6 +102,7 @@ test('daily research extracts before analysis and persists full bodies with sour
 
 test('daily research retains candidates when article retrieval fails', async () => {
   const result = await runDailyResearch({loadArticle:async()=>{throw new Error('Article HTTP 403.');},discover:async()=>({scanned:1,unusualCandidates:1,failures:[],note:'Fixture discovery',candidates:[{...source,url:source.url+'/blocked',snippet:source.text,publishedAt:new Date().toISOString(),localScore:28}]})});
+  assert.ok("selected" in result);
   assert.equal(result.candidates,1);
   assert.equal(result.selected,0);
   assert.equal(result.providerUsage.articleFallbacks,1);
