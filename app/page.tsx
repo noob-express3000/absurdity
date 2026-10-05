@@ -398,14 +398,14 @@ export default function Home() {
   return (
     <main className="reader-app">
       <header className="app-header">
-        <button className="brand" onClick={() => changeTab("home")} aria-label="New stories" title="New stories">
+        <button className="brand" onClick={() => changeTab("home")} aria-label="New stories" aria-current={tab === "home" ? "page" : undefined} title="New stories">
           <span className="brand-icon" aria-hidden="true">A</span>
-          <h1 className="sr-only">Absurdity</h1>
+          <h1 className="brand-name">Absurdity</h1>
         </button>
         <nav className="tabs" aria-label="Story views">
           {([ ["favorites", "Favorites"], ["history", "History"] ] as const).map(([id, label]) => (
             <button key={id} onClick={() => changeTab(id)} aria-current={tab === id ? "page" : undefined}>
-              {label}
+              {id === "favorites" ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L3 9.6l6.2-.9L12 3Z"/></svg> : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>}{label}
             </button>
           ))}
         </nav>
@@ -465,6 +465,7 @@ export default function Home() {
             </form>}
 
             <div className="voice-controls">
+              {(listening || voiceState !== "idle") && <span className={`voice-indicator ${listening ? "is-listening" : ""}`} role="status"><span className="voice-wave" aria-hidden="true"><i/><i/><i/></span>{listening ? "Listening" : voiceState === "loading" ? "Preparing" : "Reading"}</span>}
               <button onClick={narrate} disabled={!visibleStories.length} className="read-button" aria-label={voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud">
                 {voiceState === "loading" ? <svg className="loading-ring" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : voiceState === "playing" ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.8c0-.7.8-1.1 1.4-.7l10 6.2a.8.8 0 0 1 0 1.4l-10 6.2c-.6.4-1.4 0-1.4-.7V5.8Z"/></svg>}
               </button>
