@@ -84,6 +84,7 @@ export class GroqIntelligenceProvider implements IntelligenceProvider {
     if (!this.apiKey) throw new Error("Groq is not configured.");
 
     const response = await fetch("https://api.groq.com/openai/v1/responses", {
+      signal: AbortSignal.timeout(30000),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -202,7 +203,7 @@ ${JSON.stringify(evidence)}`,
         : "harmless";
 
     return {
-      selected: Boolean(parsed.selected),
+      selected: parsed.selected === true,
       summary: stringValue(parsed.summary, context.snippet || context.title),
       detailedSummary: stringValue(parsed.detailedSummary, parsed.summary || context.snippet || context.title),
       whyItsWeird: stringValue(parsed.whyItsWeird, "The event was flagged as unusually improbable or unexpected."),
@@ -212,7 +213,9 @@ ${JSON.stringify(evidence)}`,
         : [],
       country: stringValue(parsed.country, "Unknown"),
       region: stringValue(parsed.region, "Unknown"),
-      eventDate: typeof parsed.eventDate === "string" ? parsed.eventDate : null,
+      eventDate: typeof parsed.eventDate === "string" && Number.isFinite(Date.parse(parsed.eventDate))
+        ? new Date(parsed.eventDate).toISOString()
+        : null,
       absurdityScore: score(parsed.absurdityScore, context.localScore),
       noveltyScore: score(parsed.noveltyScore, context.localScore),
       humorScore: score(parsed.humorScore, 0),

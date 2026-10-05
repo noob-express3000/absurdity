@@ -5,20 +5,24 @@ import { storyRepository } from "@/lib/repository";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const message = typeof body.message === "string" ? body.message.trim() : "";
-    const storyId = typeof body.storyId === "string" ? body.storyId : undefined;
+    const body = await request.json().catch(() => null);
+    const message = typeof body?.message === "string" ? body.message.trim() : "";
+    const storyId = typeof body?.storyId === "string" ? body.storyId : undefined;
 
     if (!message) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
     const briefing = await storyRepository.getCurrentBriefing();
+    const selectedStory = storyId ? await storyRepository.getStory(storyId) : null;
+    const corpus = selectedStory && !briefing.stories.some((story) => story.id === selectedStory.id)
+      ? [...briefing.stories, selectedStory]
+      : briefing.stories;
     const provider = new GroqIntelligenceProvider();
 
     if (provider.available()) {
       try {
-        const text = await provider.converse(message, briefing.stories, storyId);
+        const text = await provider.converse(message, corpus, storyId);
         return NextResponse.json({
           text,
           intent: "groq-grounded",

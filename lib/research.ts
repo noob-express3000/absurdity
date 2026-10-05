@@ -45,7 +45,7 @@ export function scoreHeadlineLocally(title: string, snippet = "") {
 }
 
 export async function runLightweightDiscovery() {
-  const parser = new Parser();
+  const parser = new Parser({ timeout: 15000 });
   const candidates: DiscoveredCandidate[] = [];
   const failures: string[] = [];
 

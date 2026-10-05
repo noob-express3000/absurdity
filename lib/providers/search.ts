@@ -14,6 +14,7 @@ export class ExaSearchProvider implements SearchProvider {
   async search(query: string, limit = 5) {
     if (!this.apiKey) throw new Error("Exa is not configured.");
     const response = await fetch("https://api.exa.ai/search", {
+      signal: AbortSignal.timeout(20000),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -37,6 +38,7 @@ export class TavilySearchProvider implements SearchProvider {
   async search(query: string, limit = 5) {
     if (!this.apiKey) throw new Error("Tavily is not configured.");
     const response = await fetch("https://api.tavily.com/search", {
+      signal: AbortSignal.timeout(20000),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

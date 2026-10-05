@@ -27,13 +27,15 @@ The application has three primary tabs:
 
 - **New stories** — stories from the current 48-hour window.
 - **Favorites** — stories the user saved.
-- **History** — the permanent archive with search and timeframe filters.
+- **History** — the permanent archive, navigated and searched through the agent on request.
 
 The main reading layout intentionally stays simple:
 
 1. story-title list on the left;
-2. selected story and source links in the main reading pane;
-3. narration and navigation controls at the bottom.
+2. selected story followed by source links in the main reading pane;
+3. small narration and navigation controls at the bottom.
+
+The whole reader fits one viewport. The title list and article scroll internally. Search and date fields are handled by agent instructions instead of occupying the default interface. If speech recognition is unavailable or microphone access is denied, a compact instruction box appears.
 
 On the New stories tab, a story can be dismissed with the × control or a left swipe. Favorites and dismissed-state currently persist in browser `localStorage`.
 
@@ -47,13 +49,12 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - New stories / Favorites / History navigation
 - 48-hour home-feed rule
 - permanent demo archive view
-- history search and timeframe filtering
+- requested archive search by location, keywords, category and publication date
 - favorites persistence
 - dismissed-story persistence
 - swipe-to-dismiss
 - original-source links
 - event/publication date separation
-- story verification notes
 - ElevenLabs narration route with browser speech fallback
 - optional browser speech-recognition commands for hands-free navigation
 - lightweight RSS discovery endpoint
@@ -78,6 +79,12 @@ Where the browser exposes the Web Speech recognition API, the interface understa
 - `favorites`
 - `home`
 - `stop listening`
+- `find South African stories`
+- `find animal stories from the last week`
+- `find stories on 2026-10-01`
+- `find animal stories in my favorites`
+
+Navigation searches only stored stories when requested; it does not invoke web research or discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
 
 Narration works independently through ElevenLabs when configured and falls back to browser text-to-speech.
 
@@ -104,7 +111,7 @@ Copy `.env.example` to `.env.local` when configuring providers.
 
 ## Local setup
 
-Requirements: Node.js 20.9+ and npm.
+Requirements: Node.js 22.13+ (including built-in SQLite) and npm. The pinned deployment runtime is in `.node-version`.
 
 ```bash
 npm install
@@ -117,12 +124,13 @@ Useful checks:
 
 ```bash
 npm run typecheck
+npm test
 npm run build
 ```
 
 ## Architecture
 
-- `app/page.tsx` — reader UI, favorites, dismissals, history filters and hands-free controls
+- `app/page.tsx` — reader UI, favorites, dismissals and agent navigation
 - `app/api/narrate/route.ts` — narration endpoint
 - `app/api/research/route.ts` — lightweight discovery endpoint
 - `app/api/chat/route.ts` — retained grounded-agent seam
@@ -130,6 +138,7 @@ npm run build
 - `lib/demo-data.ts` — seeded demonstration corpus
 - `lib/research.ts` — RSS collection and deterministic triage
 - `lib/agent.ts` — deterministic corpus agent
+- `lib/navigation.ts` — explicit in-app navigation and archive search instructions
 - `lib/providers/intelligence.ts` — optional Groq provider
 - `lib/providers/search.ts` — optional Exa / Tavily provider
 - `lib/providers/voice.ts` — optional ElevenLabs provider
@@ -141,10 +150,10 @@ npm run build
 - service: `absurdity`
 - plan: free by default
 - region: Frankfurt
-- build: `npm install && npm run build`
+- build: `npm ci && npm run build`
 - start: `npm start`
 - health check: `/api/health`
-- default mode: `ABSURDITY_MODE=demo`
+- deployed mode: `ABSURDITY_MODE=live` (local default: demo)
 
 Provider secrets belong in the Render service environment and should never be committed.
 
@@ -161,8 +170,8 @@ Provider secrets belong in the Render service environment and should never be co
 
 The backend now implements the production data seam discussed for Absurdity:
 
-- PostgreSQL when `DATABASE_URL` is configured.
-- Built-in SQLite fallback for local development when `DATABASE_URL` is absent.
+- Turso Cloud when `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are configured.
+- Built-in SQLite fallback for local development when Turso is absent.
 - Automatic SQLite/libSQL schema initialization plus `db/migrations/001_init.sql` as the canonical schema.
 - Permanent story/source/research-run records.
 - `/api/stories` for the current 48-hour briefing or searchable selected-story history.
@@ -180,3 +189,7 @@ For zero-idle-cost scheduling, `.github/workflows/research.yml` runs once per da
 Render remains the web host while Turso owns the persistent archive. Both Render and the GitHub Actions research job use the same Turso database, so the free Render filesystem is never treated as durable storage.
 
 The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Groq secrets during deployment.
+
+## Reader layout and QA
+
+The current interface follows the October notebook: story titles, story text, source links directly after the article and small read/talk controls, all within a single viewport. The reader shows only the story title, article, source links and essential controls. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.

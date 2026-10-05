@@ -8,7 +8,7 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      status: "ok",
+      status: database.ready ? "ok" : "degraded",
       service: "absurdity",
       mode: process.env.ABSURDITY_MODE || "demo",
       runtime: "node",
@@ -28,7 +28,7 @@ export async function GET() {
       },
     },
     {
-      status: 200,
+      status: database.ready ? 200 : 503,
       headers: {
         "Cache-Control": "no-store",
       },

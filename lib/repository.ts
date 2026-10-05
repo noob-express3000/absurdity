@@ -6,8 +6,10 @@ import type { Briefing, ResearchStep, Story, StorySource } from "./types";
 export interface StoryRepository {
   getCurrentBriefing(): Promise<Briefing>;
   getStory(id: string): Promise<Story | null>;
-  searchStories(query: string, limit?: number): Promise<Story[]>;
+  searchStories(query: string, limit?: number, dates?: ArchiveDates): Promise<Story[]>;
 }
+
+export type ArchiveDates = { from?: string; before?: string };
 
 export type ResearchRunRecord = {
   id?: string;
@@ -115,10 +117,10 @@ export class DemoStoryRepository implements StoryRepository {
     return demoBriefing.stories.find((story) => story.id === id) ?? null;
   }
 
-  async searchStories(query: string, limit = 200) {
-    const needle = query.trim().toLowerCase();
-    const matches = needle
-      ? demoBriefing.stories.filter((story) =>
+  async searchStories(query: string, limit = 200, dates: ArchiveDates = {}) {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = demoBriefing.stories.filter((story) => {
+      const haystack =
           [
             story.title,
             story.summary,
@@ -128,10 +130,11 @@ export class DemoStoryRepository implements StoryRepository {
             story.tags.join(" "),
           ]
             .join(" ")
-            .toLowerCase()
-            .includes(needle),
-        )
-      : demoBriefing.stories;
+            .toLowerCase();
+      return terms.every((term) => haystack.includes(term)) &&
+        (!dates.from || Date.parse(story.publicationDate) >= Date.parse(dates.from)) &&
+        (!dates.before || Date.parse(story.publicationDate) < Date.parse(dates.before));
+    });
 
     return matches.slice(0, limit);
   }
@@ -172,9 +175,10 @@ export class PersistentStoryRepository implements StoryRepository {
   async getCurrentBriefing(): Promise<Briefing> {
     const database = await getDatabase();
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
     const rows = await database.query<StoryRow>(
-      "SELECT * FROM stories WHERE status = ? AND publication_date >= ? ORDER BY rank ASC, absurdity_score DESC, publication_date DESC LIMIT ?",
-      ["selected", cutoff, 100],
+      "SELECT * FROM stories WHERE status = ? AND publication_date >= ? AND publication_date <= ? ORDER BY rank ASC, absurdity_score DESC, publication_date DESC LIMIT ?",
+      ["selected", cutoff, now, 100],
     );
 
     const stories = await Promise.all(rows.map((row) => this.hydrate(row)));
@@ -203,31 +207,21 @@ export class PersistentStoryRepository implements StoryRepository {
     return rows[0] ? this.hydrate(rows[0]) : null;
   }
 
-  async searchStories(query: string, limit = 200) {
+  async searchStories(query: string, limit = 200, dates: ArchiveDates = {}) {
     const database = await getDatabase();
-    const needle = "%" + query.trim().toLowerCase() + "%";
     const safeLimit = Math.max(1, Math.min(limit, 500));
-
-    const rows = query.trim()
-      ? await database.query<StoryRow>(
-          `SELECT * FROM stories
-           WHERE status = 'selected'
-             AND (
-               LOWER(title) LIKE ?
-               OR LOWER(summary) LIKE ?
-               OR LOWER(category) LIKE ?
-               OR LOWER(country) LIKE ?
-               OR LOWER(region) LIKE ?
-               OR LOWER(tags_json) LIKE ?
-             )
-           ORDER BY publication_date DESC, rank ASC
-           LIMIT ?`,
-          [needle, needle, needle, needle, needle, needle, safeLimit],
-        )
-      : await database.query<StoryRow>(
-          "SELECT * FROM stories WHERE status = ? ORDER BY publication_date DESC, rank ASC LIMIT ?",
-          ["selected", safeLimit],
-        );
+    const clauses = ["status = 'selected'"];
+    const args: (string | number)[] = [];
+    for (const term of query.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+      clauses.push("LOWER(title || ' ' || summary || ' ' || category || ' ' || country || ' ' || region || ' ' || tags_json) LIKE ? ESCAPE '\\'");
+      args.push("%" + term.replace(/[\\%_]/g, "\\$&") + "%");
+    }
+    if (dates.from) { clauses.push("julianday(publication_date) >= julianday(?)"); args.push(dates.from); }
+    if (dates.before) { clauses.push("julianday(publication_date) < julianday(?)"); args.push(dates.before); }
+    const rows = await database.query<StoryRow>(
+      `SELECT * FROM stories WHERE ${clauses.join(" AND ")} ORDER BY julianday(publication_date) DESC, rank ASC LIMIT ?`,
+      [...args, safeLimit],
+    );
 
     return Promise.all(rows.map((row) => this.hydrate(row)));
   }
@@ -235,6 +229,14 @@ export class PersistentStoryRepository implements StoryRepository {
   async upsertStory(story: Story) {
     const database = await getDatabase();
     const now = new Date().toISOString();
+
+    // A weaker recheck must not erase a story from the permanent selected archive.
+    if (story.status !== "selected") {
+      const existing = await database.query<{ status: string }>(
+        "SELECT status FROM stories WHERE id = ?", [story.id],
+      );
+      if (existing[0]?.status === "selected") return;
+    }
 
     await database.execute(
       `INSERT INTO stories (
