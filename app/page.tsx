@@ -47,7 +47,7 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [listening, setListening] = useState(false);
-  const [voiceHint, setVoiceHint] = useState("Say “next”, “favorite”, “dismiss”, “read”, “history” or “home”.");
+  const [voiceHint, setVoiceHint] = useState("");
   const anchorTime = useMemo(() => (usingLive ? Date.now() : demoClock()), [usingLive]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -529,8 +529,8 @@ export default function Home() {
           </div>
           <div className="reader-bottom">
             {showAgentPrompt && <form className="agent-prompt" onSubmit={(event) => { event.preventDefault(); handleVoiceCommand(agentPrompt); setAgentPrompt(""); }}>
-              <p role="status">{voiceHint}</p>
-              <div><input aria-label="Ask Absurdity to navigate" placeholder="Ask about this story, find stories…" maxLength={2000} value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
+              {agentReply && <p>{agentReply}</p>}
+              <div><input aria-label="Ask Absurdity to navigate" maxLength={2000} value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
             </form>}
 
             {agentReply && !showAgentPrompt && <div className="agent-reply"><p>{agentReply}</p><button onClick={() => setAgentReply("")} aria-label="Dismiss reply">×</button></div>}
@@ -540,7 +540,7 @@ export default function Home() {
               <button onClick={narrate} disabled={!visibleStories.length && !agentBusy && voiceState === "idle"} className="read-button" aria-label={agentBusy ? "Stop response" : voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud">
                 {agentBusy ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : voiceState === "loading" ? <svg className="loading-ring" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : voiceState === "playing" ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.8c0-.7.8-1.1 1.4-.7l10 6.2a.8.8 0 0 1 0 1.4l-10 6.2c-.6.4-1.4 0-1.4-.7V5.8Z"/></svg>}
               </button>
-              <button onClick={listening ? stopHandsFree : startHandsFree} className={`talk-button ${listening ? "is-listening" : ""}`} title={voiceHint} aria-label={listening ? "Stop listening" : "Talk to Absurdity"} aria-pressed={listening}>
+              <button onClick={listening ? stopHandsFree : startHandsFree} className={`talk-button ${listening ? "is-listening" : ""}`} title={listening ? "Stop listening" : "Talk to Absurdity"} aria-label={listening ? "Stop listening" : "Talk to Absurdity"} aria-pressed={listening}>
                 {listening ? "●" : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M8 21h8"/></svg>}
               </button>
             </div>
@@ -548,7 +548,7 @@ export default function Home() {
         </article>
       </section>
       <div className="voice-status" role="status" aria-live="polite">
-        {voiceHint !== "Say “next”, “favorite”, “dismiss”, “read”, “history” or “home”." ? voiceHint : ""}
+        {voiceHint}
       </div>
     </main>
   );
