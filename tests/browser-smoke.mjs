@@ -8,10 +8,10 @@ const page = await browser.newPage({viewport:{width:1440,height:1000},timezoneId
 const errors=[]; page.on('pageerror', e=>errors.push(e.message));
 const researchRequests=[]; page.on('request', r=>{if(r.url().includes('/api/research')) researchRequests.push(r.url());});
 await page.addInitScript(() => {
-  class Recognition { start(){window.qaRecognition=this;} stop(){} }
+  class Recognition { start(){window.qaRecognition=this;window.qaRecognitionStarts=(window.qaRecognitionStarts||0)+1;} stop(){queueMicrotask(()=>this.onend?.());} }
   window.SpeechRecognition=Recognition;
   window.qaSaid=[];
-  window.speechSynthesis.speak=u=>{window.qaSaid.push(u.text);};
+  window.speechSynthesis.speak=u=>{window.qaSaid.push(u.text); window.qaUtterance=u;};
   window.speechSynthesis.cancel=()=>{};
 });
 const command = async text => { await page.evaluate(text=>window.qaRecognition.onresult({results:[[{transcript:text}]]}),text); await page.waitForTimeout(100); };
@@ -36,10 +36,10 @@ await page.getByRole('button',{name:'History',exact:true}).click();
 assert.equal(await page.getByRole('textbox',{name:'Search stories'}).count(),0);
 await page.getByRole('button',{name:'Talk to Absurdity'}).click();
 const search = async text => {
-  const response=page.waitForResponse(r=>r.url().includes('/api/stories?') && r.url().includes('q='));
+  const response=page.waitForResponse(r=>r.url().includes('/api/chat'));
   await command(text); await response;
   await page.waitForFunction(()=>window.qaSaid.length>0);
-  await command('stop');
+  await page.getByRole('button',{name:'Stop reading'}).click();
 };
 await search('find South African stories');
 assert.match(await page.locator('aside').innerText(),/Goat walks into/);
@@ -50,7 +50,58 @@ await search('show older animal stories');
 await page.getByText('No archived stories match this search and timeframe.').first().waitFor();
 await search('find animal stories in my favorites');
 assert.equal(await storyTitle(),third);
+// Conversational turns carry context, speak replies, suppress echo, and resume listening.
+const turns=[];
+await page.route('**/api/chat',async route=>{
+  const body=route.request().postDataJSON(); turns.push(body);
+  const action={text:'The article is a demonstration fixture.',action:'none',view:null,storyId:null,query:null,from:null,before:null,read:false};
+  await route.fulfill({contentType:'application/json',body:JSON.stringify({text:action.text,action,provider:'groq',mode:'demo'})});
+});
+await command('tell me more about this story');
+await page.getByText('The article is a demonstration fixture.',{exact:true}).first().waitFor();
+await page.getByRole('button',{name:'Stop reading'}).waitFor();
+const titleBeforeEcho=await storyTitle();
+await command('next');
+assert.equal(await storyTitle(),titleBeforeEcho);
+const startsBefore=await page.evaluate(()=>window.qaRecognitionStarts);
+await page.evaluate(()=>window.qaUtterance.onend());
+assert.ok(await page.evaluate(()=>window.qaRecognitionStarts)>startsBefore);
+await command('is it real?');
+await page.waitForFunction(()=>window.qaSaid.length>1);
+await page.getByRole('button',{name:'Stop reading'}).waitFor();
+assert.equal(turns[1].history.at(-1).content,'The article is a demonstration fixture.');
+assert.equal(turns[0].storyId,turns[1].storyId);
+await page.getByRole('button',{name:'Stop reading'}).click();
+await page.unroute('**/api/chat');
+// A Groq selection outside a favorites search opens the archive and reads that article.
+let selectedReply;
+await page.route('**/api/chat',async route=>{
+  selectedReply=(await (await page.request.get(baseUrl+'/api/stories?scope=history')).json()).stories[0];
+  const action={text:'Opening that story.',action:'select',view:null,storyId:selectedReply.id,query:null,from:null,before:null,read:true};
+  await route.fulfill({contentType:'application/json',body:JSON.stringify({text:action.text,action,provider:'groq',mode:'demo'})});
+});
+await command('please open the emu article and read it');
+await page.getByRole('button',{name:'Stop reading'}).waitFor();
+assert.equal(await storyTitle(),selectedReply.title);
+assert.equal(await page.locator('nav button[aria-current]').innerText(),'History');
+assert.match(await page.evaluate(()=>window.qaSaid.at(-1)),/Escaped emu/);
+await page.getByRole('button',{name:'Stop reading'}).click();
+await page.unroute('**/api/chat');
+// Cancelling a delayed conversation must not navigate or speak after cancellation.
+await page.route('**/api/chat',async route=>{
+  await new Promise(r=>setTimeout(r,400));
+  const action={text:'Opening favorites.',action:'view',view:'favorites',storyId:null,query:null,from:null,before:null,read:false};
+  await route.fulfill({contentType:'application/json',body:JSON.stringify({text:action.text,action,provider:'groq',mode:'demo'})});
+});
+const beforeCancelledReply=await page.evaluate(()=>window.qaSaid.length);
+await command('please take me to my saved picks');
+await page.getByRole('button',{name:'Stop response'}).click();
+await page.waitForTimeout(500);
+assert.equal(await page.evaluate(()=>window.qaSaid.length),beforeCancelledReply);
+assert.equal(await page.locator('nav button[aria-current]').innerText(),'History');
+await page.unroute('**/api/chat');
 await command('stop listening');
+if (await page.getByRole('button',{name:'Dismiss reply'}).count()) await page.getByRole('button',{name:'Dismiss reply'}).click();
 await page.getByRole('button',{name:'New stories',exact:true}).click();
 const before=await page.locator('.story-row').count();
 await page.getByRole('button',{name:'Dismiss story',exact:true}).first().click();
@@ -93,5 +144,5 @@ assert.equal(await page.locator('nav button[aria-current]').innerText(),'History
 await page.getByRole('button',{name:'Close instruction box'}).click();
 assert.deepEqual(researchRequests,[]);
 assert.deepEqual(errors,[]);
-console.log('PASS single-page laptop/phone/landscape layout, inline sources, requested archive search only, voice navigation, favorites, storage reload, dismiss/restore, speech fallback, cancel-pending narration, microphone denial with typed navigation, no page errors');
+console.log('PASS conversation context, pause/resume, echo suppression, cancel-pending conversation, single-page laptop/phone/landscape layout, inline sources, requested archive search only, voice navigation, favorites, storage reload, dismiss/restore, speech fallback, cancel-pending narration, microphone denial with typed navigation, no page errors');
 await browser.close();

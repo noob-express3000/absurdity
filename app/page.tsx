@@ -5,6 +5,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { demoBriefing } from "@/lib/demo-data";
 import type { Story } from "@/lib/types";
 import { parseNavigation } from "@/lib/navigation";
+import type { ConversationTurn } from "@/lib/conversation";
+import type { VoiceReply } from "@/lib/voice-agent";
 
 type Tab = "home" | "favorites" | "history";
 type VoiceState = "idle" | "loading" | "playing";
@@ -40,6 +42,8 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<Story[] | null>(null);
   const [showAgentPrompt, setShowAgentPrompt] = useState(false);
   const [agentPrompt, setAgentPrompt] = useState("");
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentReply, setAgentReply] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [listening, setListening] = useState(false);
@@ -50,7 +54,11 @@ export default function Home() {
   const keepListeningRef = useRef(false);
   const commandHandlerRef = useRef<(command: string) => void>(() => {});
   const narrationRequestRef = useRef(0);
-  const navigationRequestRef = useRef(0);
+  const agentRequestRef = useRef(0);
+  const agentControllerRef = useRef<AbortController | null>(null);
+  const conversationRef = useRef<ConversationTurn[]>([]);
+  const speechActiveRef = useRef(false);
+  const recognitionStateRef = useRef<"idle" | "running" | "stopping">("idle");
   const audioUrlRef = useRef<string | null>(null);
   const gestureRef = useRef<{ id: string; x: number } | null>(null);
 
@@ -109,7 +117,8 @@ export default function Home() {
       recognitionRef.current?.stop?.();
       audioRef.current?.pause();
       narrationRequestRef.current += 1;
-      navigationRequestRef.current += 1;
+      agentRequestRef.current += 1;
+      agentControllerRef.current?.abort();
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
       window.speechSynthesis?.cancel();
     };
@@ -144,77 +153,98 @@ export default function Home() {
     }
   }, [selectedId, visibleStories]);
 
+  function resumeListening() {
+    if (!keepListeningRef.current || speechActiveRef.current || recognitionStateRef.current !== "idle") return;
+    try {
+      recognitionRef.current?.start();
+      recognitionStateRef.current = "running";
+    } catch {
+      keepListeningRef.current = false;
+      setListening(false);
+      setShowAgentPrompt(true);
+      setVoiceHint("Voice navigation could not restart. Type an instruction instead.");
+    }
+  }
+
+  function finishSpeech(requestId: number) {
+    if (requestId !== narrationRequestRef.current) return;
+    speechActiveRef.current = false;
+    setVoiceState("idle");
+    resumeListening();
+  }
+
   function stopNarration() {
     narrationRequestRef.current += 1;
-    navigationRequestRef.current += 1;
+    agentRequestRef.current += 1;
+    agentControllerRef.current?.abort();
+    agentControllerRef.current = null;
+    setAgentBusy(false);
     audioRef.current?.pause();
     audioRef.current = null;
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     audioUrlRef.current = null;
     window.speechSynthesis?.cancel();
+    speechActiveRef.current = false;
     setVoiceState("idle");
+    resumeListening();
   }
 
-  function browserSpeak(text: string) {
+  function browserSpeak(text: string, requestId: number) {
     if (!("speechSynthesis" in window)) {
-      setVoiceState("idle");
+      finishSpeech(requestId);
       return;
     }
-
-    window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1;
-    utterance.onend = () => setVoiceState("idle");
-    utterance.onerror = () => setVoiceState("idle");
+    utterance.onend = () => finishSpeech(requestId);
+    utterance.onerror = () => finishSpeech(requestId);
     setVoiceState("playing");
     window.speechSynthesis.speak(utterance);
   }
 
-  async function narrate() {
-    if (voiceState === "playing" || voiceState === "loading") {
-      stopNarration();
-      return;
-    }
-
-    setVoiceState("loading");
+  async function speakText(text: string) {
+    stopNarration();
     const requestId = ++narrationRequestRef.current;
-    const text = `${selected.title}. ${selected.detailedSummary}`;
-
+    speechActiveRef.current = true;
+    if (recognitionStateRef.current === "running") {
+      recognitionStateRef.current = "stopping";
+      recognitionRef.current?.stop();
+    }
+    setVoiceState("loading");
     try {
       const response = await fetch("/api/narrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
       });
-
       if (requestId !== narrationRequestRef.current) return;
-
-      if (!response.ok) {
-        browserSpeak(text);
-        return;
-      }
-
+      if (!response.ok) return browserSpeak(text, requestId);
       const blob = await response.blob();
       if (requestId !== narrationRequestRef.current) return;
       const url = URL.createObjectURL(blob);
       audioUrlRef.current = url;
       const audio = new Audio(url);
       audioRef.current = audio;
-      audio.onended = () => {
-        if (requestId !== narrationRequestRef.current) return;
-        setVoiceState("idle");
+      const release = () => {
         URL.revokeObjectURL(url);
+        if (audioUrlRef.current === url) audioUrlRef.current = null;
       };
+      audio.onended = () => { release(); finishSpeech(requestId); };
       audio.onerror = () => {
-        if (requestId !== narrationRequestRef.current) return;
-        setVoiceState("idle");
-        URL.revokeObjectURL(url);
+        release();
+        if (requestId === narrationRequestRef.current) browserSpeak(text, requestId);
       };
       setVoiceState("playing");
       await audio.play();
     } catch {
-      if (requestId === narrationRequestRef.current) browserSpeak(text);
+      if (requestId !== narrationRequestRef.current) return;
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+      if (requestId === narrationRequestRef.current) browserSpeak(text, requestId);
     }
+  }
+
+  function narrate() {
+    if (voiceState !== "idle" || agentBusy) return stopNarration();
+    if (visibleStories.length) void speakText(`${selected.title}. ${selected.detailedSummary}`);
   }
 
   function toggleFavorite(id: string) {
@@ -261,41 +291,86 @@ export default function Home() {
     keepListeningRef.current = false;
     recognitionRef.current?.stop?.();
     recognitionRef.current = null;
+    recognitionStateRef.current = "idle";
     setListening(false);
   }
 
-  async function searchArchive(instruction: Extract<ReturnType<typeof parseNavigation>, { action: "search" }>) {
+  async function askAgent(message: string) {
     stopNarration();
-    const requestId = ++navigationRequestRef.current;
-    setVoiceHint("Looking in your saved archive…");
-    const params = new URLSearchParams({ scope: "history", q: instruction.query, limit: "500" });
-    if (instruction.from) params.set("from", instruction.from);
-    if (instruction.before) params.set("before", instruction.before);
+    const requestId = ++agentRequestRef.current;
+    const controller = new AbortController();
+    agentControllerRef.current = controller;
+    setAgentBusy(true);
+    setAgentReply("");
+    setVoiceHint("Thinking…");
     try {
-      const response = await fetch(`/api/stories?${params}`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Archive unavailable");
-      const payload = await response.json();
-      if (requestId !== navigationRequestRef.current) return;
-      if (!Array.isArray(payload.stories)) throw new Error("Invalid archive response");
-      const matches: Story[] = instruction.view === "favorites"
-        ? payload.stories.filter((story: Story) => favorites.includes(story.id))
-        : payload.stories;
-      if (payload.mode === "live") {
-        setRemoteStories((current) => Array.from(new Map([...(current ?? []), ...matches].map((story) => [story.id, story])).values()));
+      const response = await fetch("/api/chat", {
+        method: "POST", signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voice: true, message, storyId: visibleStories.length ? selected.id : undefined,
+          scope: tab, visibleIds: visibleStories.slice(0, 24).map(story => story.id),
+          history: conversationRef.current, displayMode: usingLive ? "live" : "demo" }),
+      });
+      if (!response.ok) throw new Error("Conversation unavailable");
+      const reply: VoiceReply = await response.json();
+      if (requestId !== agentRequestRef.current) return;
+      agentControllerRef.current = null;
+      const plan = reply.action;
+      let text = reply.text;
+      let target = plan.storyId ? stories.find(story => story.id === plan.storyId) : visibleStories.length ? selected : undefined;
+      switch (plan.action) {
+        case "view":
+          if (plan.view) {
+            changeTab(plan.view);
+            target = (plan.view === "home" ? homeStories : plan.view === "favorites" ? favoriteStories : stories)[0];
+            if (target) setSelectedId(target.id);
+          }
+          break;
+        case "next": case "previous": {
+          const index = Math.max(0, visibleStories.findIndex(story => story.id === selected.id));
+          target = visibleStories[(index + (plan.action === "next" ? 1 : -1) + visibleStories.length) % visibleStories.length];
+          selectAdjacent(plan.action === "next" ? 1 : -1);
+          break;
+        }
+        case "select": case "read":
+          if (target) {
+            if (!visibleStories.some(story => story.id === target!.id)) changeTab("history");
+            setSelectedId(target.id);
+            stopNarration();
+          }
+          break;
+        case "favorite": case "unfavorite":
+          if (target) setFavorites(current => plan.action === "favorite"
+            ? current.includes(target!.id) ? current : [...current, target!.id]
+            : current.filter(id => id !== target!.id));
+          break;
+        case "dismiss": if (target) dismissStory(target.id); break;
+        case "search": {
+          const matches = (reply.stories ?? []).filter(story => plan.view !== "favorites" || favorites.includes(story.id));
+          if (reply.mode === "live") setRemoteStories(current => Array.from(new Map([...(current ?? []), ...matches].map(story => [story.id, story])).values()));
+          setTab(plan.view === "favorites" ? "favorites" : "history");
+          setSearchResults(matches);
+          target = matches[0];
+          if (target) setSelectedId(target.id);
+          if (plan.view === "favorites") text = matches.length
+            ? `I found ${matches.length}${matches.length === 500 ? " or more" : ""} matching ${reply.mode === "demo" ? "demo " : ""}${matches.length === 1 ? "favorite" : "favorites"}. ${target.title}.`
+            : "No favorites match that request.";
+          break;
+        }
       }
-      setTab(instruction.view);
-      setSearchResults(matches);
-      if (matches.length) setSelectedId(matches[0].id);
-      const reply = matches.length
-        ? `Found ${matches.length}${matches.length === 500 ? " or more" : ""} ${matches.length === 1 ? "story" : "stories"} in your archive. ${matches[0].title}. Say read or next.`
-        : "No saved stories match that request. Say history to see the archive again.";
-      setVoiceHint(reply);
-      browserSpeak(reply);
+      conversationRef.current = [...conversationRef.current, { role: "user", content: message }, { role: "assistant", content: text }].slice(-8) as ConversationTurn[];
+      setAgentBusy(false);
+      setAgentReply(text);
+      setVoiceHint(text);
+      void speakText((plan.read || plan.action === "read") && target ? `${text} ${target.title}. ${target.detailedSummary}` : text);
     } catch {
-      if (requestId !== navigationRequestRef.current) return;
-      const reply = "I couldn't open the saved archive. Please try again.";
-      setVoiceHint(reply);
-      browserSpeak(reply);
+      if (requestId !== agentRequestRef.current) return;
+      agentControllerRef.current = null;
+      setAgentBusy(false);
+      const text = "I couldn't connect just now. Try again, or use next, read, favorites, or history.";
+      setAgentReply(text);
+      setVoiceHint(text);
+      void speakText(text);
     }
   }
 
@@ -306,13 +381,12 @@ export default function Home() {
       case "view": return changeTab(instruction.view);
       case "next": return selectAdjacent(1);
       case "previous": return selectAdjacent(-1);
-      case "favorite": if (visibleStories.length) toggleFavorite(selected.id); return;
+      case "favorite": if (visibleStories.length) setFavorites(current => current.includes(selected.id) ? current : [...current, selected.id]); return;
       case "dismiss": if (visibleStories.length) dismissStory(selected.id); return;
       case "read": if (visibleStories.length) void narrate(); return;
       case "stop-listening": return stopHandsFree();
       case "stop": return stopNarration();
-      case "search": return void searchArchive(instruction);
-      default: setVoiceHint("Try next, read, favorites, history, or find South African stories.");
+      default: if (raw.trim()) void askAgent(raw.trim());
     }
   }
 
@@ -335,6 +409,7 @@ export default function Home() {
     recognition.interimResults = false;
     recognition.lang = "en-US";
     recognition.onresult = (event: any) => {
+      if (speechActiveRef.current) return;
       const last = event.results[event.results.length - 1];
       const transcript = last?.[0]?.transcript?.trim();
       if (transcript) commandHandlerRef.current(transcript);
@@ -350,21 +425,16 @@ export default function Home() {
       }
     };
     recognition.onend = () => {
-      if (!keepListeningRef.current) {
-        setListening(false);
-        return;
-      }
-      try {
-        recognition.start();
-      } catch {
-        setListening(false);
-      }
+      if (recognitionRef.current !== recognition) return;
+      recognitionStateRef.current = "idle";
+      if (!keepListeningRef.current) { setListening(false); return; }
+      resumeListening();
     };
 
     keepListeningRef.current = true;
     recognitionRef.current = recognition;
     try {
-      recognition.start();
+      if (!speechActiveRef.current) { recognition.start(); recognitionStateRef.current = "running"; }
     } catch {
       keepListeningRef.current = false;
       recognitionRef.current = null;
@@ -377,7 +447,6 @@ export default function Home() {
   }
 
   function changeTab(nextTab: Tab) {
-    navigationRequestRef.current += 1;
     setTab(nextTab);
     setSearchResults(null);
     stopNarration();
@@ -461,13 +530,15 @@ export default function Home() {
           <div className="reader-bottom">
             {showAgentPrompt && <form className="agent-prompt" onSubmit={(event) => { event.preventDefault(); handleVoiceCommand(agentPrompt); setAgentPrompt(""); }}>
               <p role="status">{voiceHint}</p>
-              <div><input aria-label="Ask Absurdity to navigate" placeholder="Find stories, open history…" value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
+              <div><input aria-label="Ask Absurdity to navigate" placeholder="Ask about this story, find stories…" maxLength={2000} value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
             </form>}
 
+            {agentReply && !showAgentPrompt && <div className="agent-reply"><p>{agentReply}</p><button onClick={() => setAgentReply("")} aria-label="Dismiss reply">×</button></div>}
             <div className="voice-controls">
-              {(listening || voiceState !== "idle") && <span className={`voice-indicator ${listening ? "is-listening" : ""}`} role="status"><span className="voice-wave" aria-hidden="true"><i/><i/><i/></span>{listening ? "Listening" : voiceState === "loading" ? "Preparing" : "Reading"}</span>}
-              <button onClick={narrate} disabled={!visibleStories.length} className="read-button" aria-label={voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud">
-                {voiceState === "loading" ? <svg className="loading-ring" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : voiceState === "playing" ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.8c0-.7.8-1.1 1.4-.7l10 6.2a.8.8 0 0 1 0 1.4l-10 6.2c-.6.4-1.4 0-1.4-.7V5.8Z"/></svg>}
+              <button onClick={() => setShowAgentPrompt(current => !current)} className="type-button" aria-label="Type to Absurdity" aria-expanded={showAgentPrompt} title="Type to Absurdity"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg></button>
+              {(agentBusy || listening || voiceState !== "idle") && <span className={`voice-indicator ${listening && voiceState === "idle" && !agentBusy ? "is-listening" : ""}`} role="status"><span className="voice-wave" aria-hidden="true"><i/><i/><i/></span>{agentBusy ? "Thinking" : voiceState === "loading" ? "Preparing" : voiceState === "playing" ? "Speaking" : "Listening"}</span>}
+              <button onClick={narrate} disabled={!visibleStories.length && !agentBusy && voiceState === "idle"} className="read-button" aria-label={agentBusy ? "Stop response" : voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud">
+                {agentBusy ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : voiceState === "loading" ? <svg className="loading-ring" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : voiceState === "playing" ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.8c0-.7.8-1.1 1.4-.7l10 6.2a.8.8 0 0 1 0 1.4l-10 6.2c-.6.4-1.4 0-1.4-.7V5.8Z"/></svg>}
               </button>
               <button onClick={listening ? stopHandsFree : startHandsFree} className={`talk-button ${listening ? "is-listening" : ""}`} title={voiceHint} aria-label={listening ? "Stop listening" : "Talk to Absurdity"} aria-pressed={listening}>
                 {listening ? "●" : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M8 21h8"/></svg>}

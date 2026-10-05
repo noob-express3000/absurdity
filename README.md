@@ -86,9 +86,11 @@ Where the browser exposes the Web Speech recognition API, the interface understa
 
 Navigation searches only stored stories when requested; it does not invoke web research or discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
 
-The microphone uses browser speech recognition and keeps listening until toggled off or told `stop listening`. Recognized instructions go through the local navigation parser; requested searches query only the stored archive. The separate Groq chat endpoint is not wired into this voice interface, so the current experience is command-based rather than a conversational LLM agent. If recognition is unsupported or permission is denied, typed navigation becomes available.
+The microphone uses browser speech recognition. Simple commands stay local for fast navigation; questions, conversational instructions and requested searches go to Groq through `/api/chat`. Groq receives the selected article, visible titles and the last eight conversation turns, and returns a validated reader action plus a grounded reply. Searches query only the stored archive. Conversation history stays in page memory. The chat button opens a compact typed alternative, also available automatically if microphone access is denied or recognition is unsupported.
 
-The play button or `read` reads the selected title and article through ElevenLabs when configured, falling back to browser text-to-speech when unavailable. Search confirmations use browser speech. `stop` stops narration; changing the story or view also cancels it. The control dock shows listening, preparing and reading states.
+Set `GROQ_API_KEY` on the Render service to enable conversation; the default model is `openai/gpt-oss-120b`. This is a Groq-hosted model and uses no OpenAI API key. Without Groq, simple commands and deterministic archive searches remain available; live answers never fall back to fixture claims. Groq currently handles reasoning and navigation, while browser recognition handles speech-to-text.
+
+The play button or `read` reads the selected title and article through ElevenLabs when configured, falling back to browser text-to-speech when unavailable. Agent replies use the same playback pipeline. The microphone pauses during speech and resumes afterward until toggled off or told `stop listening`. Use the stop control to interrupt a reply; `stop` cancels narration or a pending conversation while listening. Changing the story or view also cancels pending work. The dock shows listening, thinking, preparing and speaking states.
 
 ## Live research pipeline
 

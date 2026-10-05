@@ -1,0 +1,83 @@
+import assert from 'node:assert/strict';
+import { test, before } from 'node:test';
+import { validateConversationPlan } from '../lib/conversation';
+import { GroqIntelligenceProvider } from '../lib/providers/intelligence';
+import { replyToVoice } from '../lib/voice-agent';
+import { demoBriefing } from '../lib/demo-data';
+import { storyRepository } from '../lib/repository';
+import { POST } from '../app/api/chat/route';
+
+before(() => { process.env.ABSURDITY_SQLITE_PATH = ':memory:'; delete process.env.GROQ_API_KEY; });
+const plan = { text: 'Here is the explanation.', action: 'none', view: null, storyId: null, query: null, from: null, before: null, read: false };
+const context = {message:'Tell me more',scope:'home' as const,visibleIds:[],history:[],displayMode:'demo' as const,storyId:demoBriefing.stories[0].id};
+
+test('conversation rejects invented actions, story IDs and invalid archive boundaries', () => {
+  for (const change of [{action:'web-search'},{action:'select',storyId:'invented'},{action:'search',view:'home'},{from:'tomorrow'},{from:'2026-10-02T00:00:00Z',before:'2026-10-01T00:00:00Z'},{text:''},{read:'true'}]) {
+    assert.throws(() => validateConversationPlan({...plan,...change},new Set()));
+  }
+});
+
+test('Groq receives selected article, prior turns and strict schema; reasoning is excluded', async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url,init) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input);
+      assert.equal(input.stories[0].detailedSummary,demoBriefing.stories[0].detailedSummary);
+      assert.equal(input.context.history[0].content,'What happened?');
+      assert.equal(body.text.format.type,'json_schema');
+      assert.equal(body.text.format.strict,true);
+      assert.equal(body.tools,undefined);
+      return Response.json({output:[{type:'reasoning',content:[{type:'reasoning_text',text:'Private reasoning'}]}, {type:'message',content:[{type:'output_text',text:JSON.stringify(plan)}]}]});
+    };
+    const result = await new GroqIntelligenceProvider('fake').planConversation(context.message,[demoBriefing.stories[0]],{storyId:context.storyId,scope:'home',visibleIds:[],history:[{role:'user',content:'What happened?'}],now:new Date().toISOString(),mode:'demo'});
+    assert.equal(result.text,plan.text);
+  } finally { globalThis.fetch = original; }
+});
+
+test('voice search executes the stored archive and replaces invented model result claims', async () => {
+  const original = globalThis.fetch;
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    globalThis.fetch = async () => Response.json({output_text:JSON.stringify({...plan,action:'search',view:'history',query:'south africa',text:'I found 999 stories.'})});
+    const result = await replyToVoice({...context,message:'Find South African stories'});
+    assert.equal(result.provider,'groq');
+    assert.ok(result.stories!.length > 0);
+    assert.ok(result.stories!.every(story => story.country === 'South Africa'));
+    assert.doesNotMatch(result.text,/999/);
+    assert.match(result.text,/demo/);
+  } finally { globalThis.fetch = original; delete process.env.GROQ_API_KEY; }
+});
+
+test('malformed Groq plans fall back safely and live mode never substitutes fixtures', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalBriefing = storyRepository.getCurrentBriefing;
+  const originalStory = storyRepository.getStory;
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    globalThis.fetch = async () => Response.json({output_text:JSON.stringify({...plan,action:'select',storyId:'invented'})});
+    storyRepository.getCurrentBriefing = async () => ({...demoBriefing,mode:'live',stories:[]});
+    storyRepository.getStory = async () => null;
+    const result = await replyToVoice({...context,displayMode:'live'});
+    assert.equal(result.provider,'safe-fallback');
+    assert.equal(result.action.action,'none');
+    assert.match(result.text,/temporarily unavailable/);
+    assert.doesNotMatch(result.text,/emu|goat|fixture/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    storyRepository.getCurrentBriefing = originalBriefing;
+    storyRepository.getStory = originalStory;
+    delete process.env.GROQ_API_KEY;
+  }
+});
+
+test('voice route limits oversized requests and deterministic search works without Groq', async () => {
+  const request = (body:unknown) => new Request('http://localhost/api/chat',{method:'POST',body:JSON.stringify(body)});
+  assert.equal((await POST(request({message:'a'.repeat(2001),voice:true}))).status,400);
+  const response = await POST(request({...context,message:'find animal stories in my favorites',voice:true}));
+  assert.equal(response.status,200);
+  const body = await response.json();
+  assert.equal(body.action.action,'search');
+  assert.equal(body.action.view,'favorites');
+  assert.equal(body.provider,'deterministic');
+});

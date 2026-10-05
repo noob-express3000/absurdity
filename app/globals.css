@@ -108,3 +108,9 @@ button { transition: color 140ms ease, background-color 140ms ease; }
 @media (max-height: 450px) and (min-width: 641px) { .app-header { height: 42px; } .reader-app { padding-bottom: 10px; } .reader-body { padding-top: 22px; } }
 @media (hover: none) { .row-actions { visibility: visible; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+
+.agent-reply { display: flex; align-items: flex-start; gap: 8px; width: min(360px, calc(100vw - 60px)); max-height: min(180px, 30dvh); overflow-y: auto; margin-bottom: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: 0 8px 24px #34325810; }
+.agent-reply p { margin: 0; font-size: 13px; line-height: 1.6; }
+.agent-reply button { color: var(--muted); flex-shrink: 0; }
+.type-button { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--muted); }
+.type-button:hover, .type-button[aria-expanded="true"] { background: var(--soft); color: var(--accent); }
