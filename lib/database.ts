@@ -245,7 +245,12 @@ export function getDatabase() {
           process.env.ABSURDITY_SQLITE_PATH?.trim() || ".data/absurdity.db",
         ),
       );
-    })();
+    })().catch((error) => {
+      // A transient connection/schema failure must not poison every subsequent
+      // request until the Render process is restarted.
+      databasePromise = null;
+      throw error;
+    });
   }
 
   return databasePromise;

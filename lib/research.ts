@@ -245,7 +245,14 @@ export async function runDiscovery(options: {
   }
 
   const rss = await rssPromise;
-  const merged = mergeCandidates(exaCandidates, rss.candidates);
+  const inWindow = (candidate: DiscoveredCandidate) => {
+    if (!candidate.publishedAt) return true;
+    const time = Date.parse(candidate.publishedAt);
+    return !Number.isFinite(time) || (time >= Date.parse(startPublishedDate) && time <= now.getTime());
+  };
+  // Apply freshness before the per-publisher cap, so stale search results cannot
+  // crowd out fresh Exa hits or the RSS fallback from the same publisher.
+  const merged = mergeCandidates(exaCandidates.filter(inWindow), rss.candidates.filter(inWindow));
   merged.sort((a, b) => {
     if (a.origin !== b.origin) return a.origin === "exa" ? -1 : 1;
     return b.localScore - a.localScore;

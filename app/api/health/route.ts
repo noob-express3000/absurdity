@@ -10,7 +10,7 @@ export async function GET() {
     {
       status: database.ready ? "ok" : "degraded",
       service: "absurdity",
-      mode: process.env.ABSURDITY_MODE || "demo",
+      mode: process.env.ABSURDITY_MODE === "demo" ? "demo" : "live",
       runtime: "node",
       render: process.env.RENDER === "true",
       database,

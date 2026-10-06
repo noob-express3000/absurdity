@@ -7,7 +7,7 @@ import {
   GroqIntelligenceProvider,
 } from "./providers/intelligence";
 import { getSearchProvider } from "./providers/search";
-import { recordResearchRun, saveStories, saveStoryEvidence } from "./repository";
+import { findSelectedStoryMatches, recordResearchRun, saveStories, saveStoryEvidence } from "./repository";
 import { ingestSource, type PageLoader } from "./articles";
 import { claimResearch, releaseResearch } from "./research-cycle";
 import type { IngestedEvidence, Story, StorySource } from "./types";
@@ -116,7 +116,10 @@ function deterministicAnalysis(
   discoveryEvidence: CandidateEvidence[],
 ): CandidateAnalysis {
   const summary = primary.snippet?.trim() || primary.title;
-  const multiSource = new Set(discoveryEvidence.map((item) => item.publisher)).size > 1;
+  const multiSource = new Set(discoveryEvidence.flatMap((item) => {
+    try { return [new URL(item.url).hostname.replace(/^www\./, "")]; }
+    catch { return []; }
+  })).size > 1;
 
   return {
     selected: multiSource && primary.localScore >= 12,
@@ -195,6 +198,7 @@ async function executeResearch(options: {
     articlesAttempted: 0,
     articlesExtracted: 0,
     articleFallbacks: 0,
+    alreadySelected: 0,
   };
 
   await recordResearchRun({
@@ -224,8 +228,21 @@ async function executeResearch(options: {
       return Number.isFinite(time) ? time >= windowStart.getTime() && time <= Date.now() : true;
     });
 
-    const groups = clusterCandidates(inWindow.filter((candidate) => candidate.localScore > 0))
-      .sort((a, b) => b.primary.localScore - a.primary.localScore)
+    const clustered = clusterCandidates(inWindow.filter((candidate) => candidate.localScore > 0));
+    const existing = await findSelectedStoryMatches(
+      clustered.map(group => group.clusterId),
+      clustered.flatMap(group => group.candidates.map(candidate => normalizeUrl(candidate.url))),
+      windowStart.toISOString(),
+    );
+    const selectedClusters = new Set(existing.map(item => item.cluster_id));
+    const selectedUrls = new Set(existing.map(item => item.url));
+    const unseen = clustered.filter(group => !selectedClusters.has(group.clusterId) &&
+      !group.candidates.some(candidate => selectedUrls.has(normalizeUrl(candidate.url))));
+    providerUsage.alreadySelected = clustered.length - unseen.length;
+    const groups = unseen
+      .sort((a, b) => Number(b.candidates.some(candidate => candidate.origin === "exa")) -
+        Number(a.candidates.some(candidate => candidate.origin === "exa")) ||
+        b.primary.localScore - a.primary.localScore)
       .slice(0, maxCandidates);
 
     const searchProvider = getSearchProvider();
@@ -482,4 +499,3 @@ async function executeResearch(options: {
     throw error;
   }
 }
-

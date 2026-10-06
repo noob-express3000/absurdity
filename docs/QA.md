@@ -1,5 +1,15 @@
 # QA: notebook reader and reliability fixes
 
+## Latest reliability pass — 2026-10-06
+
+- Fixed repeat processing of selected stories: canonical URLs and recent event clusters are checked before paid provider work and the candidate cap. Unselected candidates remain eligible; unrelated later events may reuse a headline.
+- Applied the date window before publisher caps and preserved Exa priority in the final shortlist.
+- Prevented two publisher labels on the same domain from counting as independent discovery sources in deterministic fallback.
+- Allowed database initialization to retry after a failed connection/setup attempt, and aligned default health mode with the live reader.
+- Added archive loading/error states, bounded archive requests, explicit retry, cached-story retention on failure, and strict explicit-demo handling for malformed responses.
+- Updated browser checks and README for separate Home and Refresh controls and honest empty live archives.
+- Verified: **58 automated tests**, TypeScript, production build, and all three browser scripts below. Browser provider/voice responses are stubbed; database regressions use isolated SQLite. This pass does not independently verify production Turso or paid-provider credentials.
+
 ## Product layout
 
 The October notebook defines a simple interface: New stories, Favorites and History; a scrollable title list beside a scrollable story; source links after the article; and a speak button for navigation. The homepage covers the current 48 hours, with older stories retained in History.
@@ -32,6 +42,7 @@ npm install --no-save --package-lock=false playwright
 npx playwright install chromium
 node tests/browser-smoke.mjs
 node tests/browser-research.mjs
+node tests/browser-reliability.mjs
 ```
 
 Run against a separate demo database and demo server. The script changes only its fresh browser profile. Set `QA_BASE_URL` for a different server, `QA_CHROMIUM_PATH` for an existing Chromium executable, and optionally `QA_SCREENSHOT_DIR` to capture screenshots.

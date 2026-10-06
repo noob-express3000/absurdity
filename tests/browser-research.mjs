@@ -43,9 +43,12 @@ await page.route('**/api/research*', async route => {
 await page.goto(process.env.QA_BASE_URL || 'http://127.0.0.1:3000');
 await page.locator('.story-row').first().waitFor();
 assert.equal(posts, 0, 'page load must not launch discovery');
-const icon = page.getByRole('button',{name:'New stories',exact:true});
-await icon.click();
-await icon.click();
+await page.getByRole('button',{name:'History',exact:true}).click();
+await page.getByRole('button',{name:'Home',exact:true}).first().click();
+assert.equal(await page.locator('nav button[aria-current]').innerText(), 'Home');
+assert.equal(posts, 0, 'Home navigation must not spend research quota');
+const icon = page.getByRole('button',{name:'Refresh stories',exact:true});
+await icon.evaluate(button => { button.click(); button.click(); });
 assert.equal(await icon.getAttribute('aria-busy'), 'true');
 await page.getByText('Reviewed 3 candidates; selected 1 story.',{exact:true}).waitFor();
 assert.equal(posts, 1, 'repeated clicks must share a run');
@@ -70,7 +73,7 @@ await page.reload();
 await page.getByText('Reviewed 3 candidates; selected 1 story.',{exact:true}).waitFor();
 assert.equal(posts, 3, 'reload must resume status without launching discovery');
 
-// Typed refresh must launch research, keep History/current article visible, and survive an empty archive response.
+// Typed refresh keeps the current article while fetching, then reflects an empty live archive honestly.
 phase = 'running'; polls = 0; emptyArchive = true;
 await page.getByRole('button',{name:'History',exact:true}).click();
 await page.getByRole('button',{name:'Type to Absurdity',exact:true}).click();
@@ -82,8 +85,12 @@ assert.equal(await page.locator('nav button[aria-current]').innerText(),'History
 await page.locator('.agent-prompt').getByText('Reviewed 3 candidates; selected 1 story.',{exact:true}).waitFor();
 assert.equal(posts, 4);
 assert.equal(chats, 0, 'explicit refresh must not search the archive or ask Groq');
-await page.getByRole('heading',{name:'Fresh article from the fetch cycle',exact:true}).waitFor();
+assert.equal(await page.locator('.story-row').count(), 0);
+assert.equal(await page.locator('.story-heading').count(), 0);
 await page.getByRole('button',{name:'Close instruction box'}).click();
+emptyArchive = false;
+await page.reload();
+await page.getByRole('heading',{name:'Fresh article from the fetch cycle',exact:true}).waitFor();
 if (process.env.QA_SCREENSHOT_DIR) await page.screenshot({path:process.env.QA_SCREENSHOT_DIR+'/reader-refresh-qa.png'});
 
 await page.route('**/api/narrate', route => route.fulfill({status:502,json:{error:'ElevenLabs could not find the configured voice ID.',code:'voice_not_found',fallback:'browser-speech'}}));
@@ -91,5 +98,5 @@ if (await page.getByRole('button',{name:'Stop reading',exact:true}).count()) awa
 await page.getByRole('button',{name:'Read aloud',exact:true}).click();
 await page.getByText('ElevenLabs could not find the configured voice ID. Using device voice.',{exact:true}).waitFor();
 assert.deepEqual(errors, []);
-console.log('PASS explicit fetch, double-click guard, loading indicator, completion refresh, failure recovery, resume after reload, typed refresh without archive search, empty-response retention, one-page layout, no page errors');
+console.log('PASS Home without research, explicit fetch, double-click guard, loading indicator, completion refresh, failure recovery, resume after reload, typed refresh without archive search, empty live archive, one-page layout, no page errors');
 await browser.close();

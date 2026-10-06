@@ -39,6 +39,7 @@ function demoClock() {
 export default function Home() {
   const [remoteStories, setRemoteStories] = useState<Story[] | null>(null);
   const [dataMode, setDataMode] = useState<"loading" | "demo" | "live">("loading");
+  const [archiveError, setArchiveError] = useState("");
   const stories = dataMode === "demo" ? demoBriefing.stories : remoteStories ?? [];
   const usingLive = dataMode !== "demo";
   const [tab, setTab] = useState<Tab>("home");
@@ -84,27 +85,39 @@ export default function Home() {
 
   const reloadArchive = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++archiveRequestRef.current;
-    const response = await fetch("/api/stories?scope=history&limit=500", { cache: "no-store", signal });
-    if (!response.ok) throw new Error("Could not refresh stories.");
-    const payload = await response.json();
-    if (signal?.aborted || requestId !== archiveRequestRef.current) return;
-    const mode = payload?.mode === "live" ? "live" : "demo";
-    if (mode === "live" && Array.isArray(payload?.stories)) {
-      setDataMode("live");
-      if (payload.stories.length) {
-        setRemoteStories(payload.stories as Story[]);
-        setSelectedId(current =>
-          payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
-      } else {
-        // An empty persistent archive is genuinely empty. Never replace it with
-        // seeded fixtures in live mode.
-        setRemoteStories([]);
+    try {
+      const response = await fetch("/api/stories?scope=history&limit=500", {
+        cache: "no-store", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
+      });
+      if (!response.ok) throw new Error("Could not refresh stories.");
+      const payload = await response.json();
+      if (signal?.aborted || requestId !== archiveRequestRef.current) return;
+      if (!["live", "demo"].includes(payload?.mode) || !Array.isArray(payload?.stories)) {
+        throw new Error("Invalid archive response.");
       }
-    } else if (mode === "demo") {
-      setDataMode("demo");
-      setRemoteStories(null);
-      setSelectedId(current =>
-        demoBriefing.stories.some(story => story.id === current) ? current : demoBriefing.stories[0].id);
+      setArchiveError("");
+      const mode = payload.mode;
+      if (mode === "live") {
+        setDataMode("live");
+        if (payload.stories.length) {
+          setRemoteStories(payload.stories as Story[]);
+          setSelectedId(current =>
+            payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
+        } else {
+          // An empty persistent archive is genuinely empty. Never replace it with
+          // seeded fixtures in live mode.
+          setRemoteStories([]);
+        }
+      } else if (mode === "demo") {
+        setDataMode("demo");
+        setRemoteStories(null);
+        setSelectedId(current =>
+          demoBriefing.stories.some(story => story.id === current) ? current : demoBriefing.stories[0].id);
+      }
+    } catch (error) {
+      if (signal?.aborted || requestId !== archiveRequestRef.current) return;
+      setArchiveError("Couldn't load the story archive. Try again.");
+      throw error;
     }
   }, []);
 
@@ -602,7 +615,9 @@ export default function Home() {
     tab === "home" ? "New stories" : tab === "favorites" ? "Favorites" : "History";
 
   const emptyMessage =
-    tab === "home"
+    archiveError ? "The story archive is temporarily unavailable."
+    : dataMode === "loading" ? "Loading stories…"
+    : tab === "home"
       ? dismissed.length
         ? "You cleared the current feed. Restore dismissed stories to review it again."
         : "No stories landed in the current two-day window."
@@ -695,6 +710,7 @@ export default function Home() {
             ) : <p className="empty-state">{emptyMessage}</p>}
           </div>
           <div className="reader-bottom">
+            {archiveError && <div className="agent-reply" role="alert"><p>{archiveError}</p><button onClick={() => void reloadArchive().catch(() => {})} aria-label="Retry loading stories">Retry</button></div>}
             {showAgentPrompt && <form className="agent-prompt" onSubmit={(event) => { event.preventDefault(); handleVoiceCommand(agentPrompt); setAgentPrompt(""); }}>
               {agentReply && <p>{agentReply}</p>}
               <div><input aria-label="Ask Absurdity to navigate" maxLength={2000} value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>

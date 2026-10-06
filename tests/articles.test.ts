@@ -101,7 +101,7 @@ test('daily research extracts before analysis and persists full bodies with sour
 });
 
 test('daily research retains candidates when article retrieval fails', async () => {
-  const result = await runDailyResearch({loadArticle:async()=>{throw new Error('Article HTTP 403.');},discover:async()=>({scanned:1,unusualCandidates:1,failures:[],note:'Fixture discovery',candidates:[{...source,url:source.url+'/blocked',snippet:source.text,publishedAt:new Date().toISOString(),localScore:28}]})});
+  const result = await runDailyResearch({loadArticle:async()=>{throw new Error('Article HTTP 403.');},discover:async()=>({scanned:1,unusualCandidates:1,failures:[],note:'Fixture discovery',candidates:[{...source,title:'Escaped goat interrupts a council meeting',url:source.url+'/blocked',snippet:source.text,publishedAt:new Date().toISOString(),localScore:28}]})});
   assert.ok("selected" in result);
   assert.equal(result.candidates,1);
   assert.equal(result.selected,0);

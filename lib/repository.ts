@@ -325,6 +325,21 @@ export async function saveStories(stories: Story[]) {
   }
 }
 
+// Match the discovery shortlist against persisted selections before spending
+// extraction, search, or model calls on an event the reader already has.
+export async function findSelectedStoryMatches(clusterIds: string[], urls: string[], windowStart: string) {
+  if (!clusterIds.length || !urls.length) return [];
+  const database = await getDatabase();
+  return database.query<{ cluster_id: string; url: string | null }>(
+    `SELECT s.cluster_id, source.url FROM stories s
+      LEFT JOIN story_sources source ON source.story_id = s.id
+      WHERE s.status = 'selected' AND s.is_fixture = 0 AND
+        ((s.cluster_id IN (${clusterIds.map(() => '?').join(',')}) AND s.publication_date >= ?) OR
+         source.url IN (${urls.map(() => '?').join(',')}))`,
+    [...clusterIds, windowStart, ...urls],
+  );
+}
+
 export async function recordResearchRun(run: ResearchRunRecord) {
   const database = await getDatabase();
   const id = run.id || randomUUID();
