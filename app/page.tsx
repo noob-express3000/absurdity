@@ -31,6 +31,18 @@ function parseStoredIds(key: string) {
   }
 }
 
+const storyDateFormatter = new Intl.DateTimeFormat("en-ZA", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "Africa/Johannesburg",
+});
+
+function formatStoryDate(value: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? storyDateFormatter.format(date) : "Date unavailable";
+}
+
 function demoClock() {
   if (demoBriefing.mode !== "demo") return Date.now();
   return Math.max(...demoBriefing.stories.map((story) => new Date(story.publicationDate).getTime()));
@@ -706,6 +718,14 @@ export default function Home() {
                     ))}
                   </div>
                 </div>
+                <footer className="story-meta-footer" aria-label="Story date and verification">
+                  <span>{formatStoryDate(selected.publicationDate)}</span>
+                  <span title={selected.verificationNotes}>
+                    {selected.confidence === "high" ? "High-confidence verification"
+                      : selected.confidence === "medium" ? "Medium-confidence verification"
+                      : "Limited verification"}
+                  </span>
+                </footer>
               </>
             ) : <p className="empty-state">{emptyMessage}</p>}
           </div>
