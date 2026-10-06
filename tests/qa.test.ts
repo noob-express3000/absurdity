@@ -9,10 +9,11 @@ import { demoBriefing } from '../lib/demo-data';
 import { PersistentStoryRepository, recordResearchRun, getLatestResearchRun, storyRepository } from '../lib/repository';
 import { GroqIntelligenceProvider } from '../lib/providers/intelligence';
 import { ElevenLabsVoiceProvider } from '../lib/providers/voice';
+import { assertDatabaseReady } from '../lib/database';
 
 before(() => {
   process.env.ABSURDITY_SQLITE_PATH = ':memory:';
-  for (const key of ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']) delete process.env[key];
+  for (const key of ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'ABSURDITY_REQUIRE_TURSO', 'RENDER', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']) delete process.env[key];
 });
 const request = (body: unknown) => new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) });
 
@@ -76,6 +77,27 @@ test('healthy local database reports ready without caching', async () => {
   assert.equal((await response.json()).database.ready, true);
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
+test('empty database initialization is repeatable and preserves startup records', () => {
+  const script = [
+    "const {assertDatabaseReady}=await import('./lib/database.ts');",
+    "const {recordResearchRun,getLatestResearchRun}=await import('./lib/repository.ts');",
+    "await assertDatabaseReady();",
+    "await recordResearchRun({id:'startup-record',startedAt:'2026-10-06T00:00:00.000Z',windowStart:'2026-10-05T00:00:00.000Z',windowEnd:'2026-10-06T00:00:00.000Z',status:'complete',scanned:1,candidates:1,selected:1,failures:[],providerUsage:{}});",
+    "await assertDatabaseReady();",
+    "if((await getLatestResearchRun())?.id!=='startup-record') process.exit(2);",
+  ].join(' ');
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    env: {...process.env,ABSURDITY_SQLITE_PATH:':memory:',ABSURDITY_REQUIRE_TURSO:'false',RENDER:'false',TURSO_DATABASE_URL:'',TURSO_AUTH_TOKEN:''},
+    encoding:'utf8',
+  });
+  assert.equal(result.status,0,result.stderr);
+});
+test('Render refuses to boot without Turso instead of silently falling back to SQLite', () => {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
+    "const {GET}=await import('./app/api/health/route.ts'); const r=await GET(); const body=await r.json(); if(r.status!==503||body.database.kind!=='turso') process.exit(1);"],
+    {env:{...process.env,RENDER:'true',ABSURDITY_REQUIRE_TURSO:'true',TURSO_DATABASE_URL:'',TURSO_AUTH_TOKEN:'',ABSURDITY_SQLITE_PATH:':memory:'},encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr);
+});
 test('missing Turso authentication fails readiness with 503', () => {
   const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
     "const {GET}=await import('./app/api/health/route.ts'); const r=await GET(); if(r.status!==503) process.exit(1);"],
@@ -109,6 +131,22 @@ test('weaker reanalysis preserves previously selected archive entries and eviden
   await repository.upsertStory({...original, status:'candidate', sources:[], summary:'Weaker fallback'});
   assert.deepEqual(await repository.getStory('qa-old'),original);
   assert.ok((await repository.searchStories('')).some(story=>story.id==='qa-old'));
+});
+test('failed story updates roll back the story and child rows atomically', async () => {
+  const repository = new PersistentStoryRepository();
+  const original = {...demoBriefing.stories[0],id:'qa-atomic',isFixture:false};
+  await repository.upsertStory(original);
+  const broken = {
+    ...original,
+    summary:'This must roll back',
+    sources:[{...original.sources[0],publisher:'Replacement publisher'}],
+    research:[{label:'Broken child write',detail:'Force NOT NULL failure',status:'complete' as const,at:null as any}],
+  };
+  await assert.rejects(() => repository.upsertStory(broken));
+  const saved = await repository.getStory(original.id);
+  assert.equal(saved?.summary, original.summary);
+  assert.deepEqual(saved?.sources, original.sources);
+  assert.deepEqual(saved?.research, original.research);
 });
 test('research run telemetry updates the existing run', async () => {
   const run = {id:'qa-run', startedAt:new Date().toISOString(),windowStart:'2026-10-01T00:00:00Z',windowEnd:'2026-10-02T00:00:00Z',status:'running' as const, scanned:0,candidates:0,selected:0,failures:[],providerUsage:{}};

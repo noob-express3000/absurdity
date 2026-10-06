@@ -1,9 +1,14 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createClient } from "@tursodatabase/serverless/compat";
+import { connect } from "@tursodatabase/serverless";
 
 export type DatabaseKind = "turso" | "sqlite";
+
+export type SqlStatement = {
+  sql: string;
+  params?: unknown[];
+};
 
 export interface SqlDatabase {
   kind: DatabaseKind;
@@ -12,6 +17,7 @@ export interface SqlDatabase {
     params?: unknown[],
   ): Promise<T[]>;
   execute(sql: string, params?: unknown[]): Promise<number>;
+  batch(statements: SqlStatement[], atomic?: boolean): Promise<void>;
 }
 
 const schemaStatements = [
@@ -113,26 +119,28 @@ const schemaStatements = [
 
 class TursoDatabase implements SqlDatabase {
   kind: DatabaseKind = "turso";
-  private client: ReturnType<typeof createClient>;
+  private client: ReturnType<typeof connect>;
 
   constructor(url: string, authToken: string) {
-    this.client = createClient({ url, authToken });
+    this.client = connect({ url, authToken });
   }
 
   async query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []) {
-    const result = await this.client.execute({
-      sql,
-      args: params as any[],
-    });
-    return result.rows as unknown as T[];
+    const rows = await this.client.prepare(sql).all(params as any[]);
+    return rows as unknown as T[];
   }
 
   async execute(sql: string, params: unknown[] = []) {
-    const result = await this.client.execute({
-      sql,
-      args: params as any[],
-    });
-    return Number(result.rowsAffected);
+    const result = await this.client.prepare(sql).run(params as any[]);
+    return Number(result.changes);
+  }
+
+  async batch(statements: SqlStatement[], atomic = false) {
+    if (!statements.length) return;
+    await this.client.batch(
+      statements.map(({ sql, params = [] }) => ({ sql, args: params as any[] })),
+      atomic ? "immediate" : undefined,
+    );
   }
 }
 
@@ -165,6 +173,33 @@ class SqliteDatabase implements SqlDatabase {
     const result = statement.run(...(params as any[]));
     return Number(result.changes);
   }
+
+  async batch(statements: SqlStatement[], atomic = false) {
+    if (!statements.length) return;
+
+    if (!atomic) {
+      for (const statement of statements) {
+        await this.execute(statement.sql, statement.params);
+      }
+      return;
+    }
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const statement of statements) {
+        const prepared = this.db.prepare(statement.sql);
+        prepared.run(...((statement.params || []) as any[]));
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Preserve the original database error.
+      }
+      throw error;
+    }
+  }
 }
 
 let databasePromise: Promise<SqlDatabase> | null = null;
@@ -174,12 +209,14 @@ async function initialize(database: SqlDatabase) {
   if (initialized) return database;
 
   await database.execute("PRAGMA foreign_keys = ON");
-  for (const statement of schemaStatements) {
-    await database.execute(statement);
-  }
+  await database.batch(schemaStatements.map((sql) => ({ sql })), true);
 
   initialized = true;
   return database;
+}
+
+export function tursoRequired() {
+  return process.env.ABSURDITY_REQUIRE_TURSO === "true" || process.env.RENDER === "true";
 }
 
 export function getDatabase() {
@@ -188,11 +225,19 @@ export function getDatabase() {
       const tursoUrl = process.env.TURSO_DATABASE_URL?.trim();
       const tursoToken = process.env.TURSO_AUTH_TOKEN?.trim();
 
+      if (tursoToken && !tursoUrl) {
+        throw new Error("TURSO_DATABASE_URL is required when TURSO_AUTH_TOKEN is configured.");
+      }
+
       if (tursoUrl) {
         if (!tursoToken) {
           throw new Error("TURSO_AUTH_TOKEN is required when TURSO_DATABASE_URL is configured.");
         }
         return initialize(new TursoDatabase(tursoUrl, tursoToken));
+      }
+
+      if (tursoRequired()) {
+        throw new Error("Turso is required in this deployment, but TURSO_DATABASE_URL is not configured.");
       }
 
       return initialize(
@@ -206,6 +251,15 @@ export function getDatabase() {
   return databasePromise;
 }
 
+export async function assertDatabaseReady() {
+  const database = await getDatabase();
+  await database.query("SELECT 1 AS ok");
+  if (tursoRequired() && database.kind !== "turso") {
+    throw new Error("Turso is required in this deployment, but the active database is not Turso.");
+  }
+  return database.kind;
+}
+
 export async function databaseStatus() {
   try {
     const database = await getDatabase();
@@ -214,7 +268,7 @@ export async function databaseStatus() {
   } catch (error) {
     return {
       ready: false,
-      kind: process.env.TURSO_DATABASE_URL ? "turso" : "sqlite",
+      kind: process.env.TURSO_DATABASE_URL || tursoRequired() ? "turso" : "sqlite",
       error: error instanceof Error ? error.message : "Database unavailable",
     };
   }

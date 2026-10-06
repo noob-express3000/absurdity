@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "research:daily": "tsx scripts/research-daily.ts"
+    "research:daily": "tsx scripts/research-daily.ts",
+    "db:check": "tsx scripts/db-ready.ts"
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",

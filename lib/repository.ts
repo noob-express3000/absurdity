@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getDatabase } from "./database";
+import { getDatabase, type SqlStatement } from "./database";
 import { demoBriefing } from "./demo-data";
 import type { Briefing, ResearchStep, Story, StorySource, IngestedEvidence } from "./types";
 
@@ -238,85 +238,83 @@ export class PersistentStoryRepository implements StoryRepository {
       if (existing[0]?.status === "selected") return;
     }
 
-    await database.execute(
-      `INSERT INTO stories (
-        id, cluster_id, rank, title, short_title, summary, detailed_summary, why_weird,
-        category, tags_json, country, region, event_date, publication_date, discovered_at,
-        absurdity_score, novelty_score, humor_score, seriousness_score, credibility_score,
-        confidence, seriousness, verification_notes, status, is_fixture, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        cluster_id = excluded.cluster_id,
-        rank = excluded.rank,
-        title = excluded.title,
-        short_title = excluded.short_title,
-        summary = excluded.summary,
-        detailed_summary = excluded.detailed_summary,
-        why_weird = excluded.why_weird,
-        category = excluded.category,
-        tags_json = excluded.tags_json,
-        country = excluded.country,
-        region = excluded.region,
-        event_date = excluded.event_date,
-        publication_date = excluded.publication_date,
-        discovered_at = excluded.discovered_at,
-        absurdity_score = excluded.absurdity_score,
-        novelty_score = excluded.novelty_score,
-        humor_score = excluded.humor_score,
-        seriousness_score = excluded.seriousness_score,
-        credibility_score = excluded.credibility_score,
-        confidence = excluded.confidence,
-        seriousness = excluded.seriousness,
-        verification_notes = excluded.verification_notes,
-        status = excluded.status,
-        is_fixture = excluded.is_fixture,
-        updated_at = excluded.updated_at`,
-      [
-        story.id,
-        story.clusterId,
-        story.rank,
-        story.title,
-        story.shortTitle,
-        story.summary,
-        story.detailedSummary,
-        story.whyItsWeird,
-        story.category,
-        JSON.stringify(story.tags),
-        story.country,
-        story.region,
-        story.eventDate,
-        story.publicationDate,
-        story.discoveredAt,
-        story.absurdityScore,
-        story.noveltyScore,
-        story.humorScore,
-        story.seriousnessScore,
-        story.credibilityScore,
-        story.confidence,
-        story.seriousness,
-        story.verificationNotes,
-        story.status,
-        story.isFixture ? 1 : 0,
-        now,
-        now,
-      ],
-    );
+    const statements: SqlStatement[] = [
+      {
+        sql: `INSERT INTO stories (
+          id, cluster_id, rank, title, short_title, summary, detailed_summary, why_weird,
+          category, tags_json, country, region, event_date, publication_date, discovered_at,
+          absurdity_score, novelty_score, humor_score, seriousness_score, credibility_score,
+          confidence, seriousness, verification_notes, status, is_fixture, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          cluster_id = excluded.cluster_id,
+          rank = excluded.rank,
+          title = excluded.title,
+          short_title = excluded.short_title,
+          summary = excluded.summary,
+          detailed_summary = excluded.detailed_summary,
+          why_weird = excluded.why_weird,
+          category = excluded.category,
+          tags_json = excluded.tags_json,
+          country = excluded.country,
+          region = excluded.region,
+          event_date = excluded.event_date,
+          publication_date = excluded.publication_date,
+          discovered_at = excluded.discovered_at,
+          absurdity_score = excluded.absurdity_score,
+          novelty_score = excluded.novelty_score,
+          humor_score = excluded.humor_score,
+          seriousness_score = excluded.seriousness_score,
+          credibility_score = excluded.credibility_score,
+          confidence = excluded.confidence,
+          seriousness = excluded.seriousness,
+          verification_notes = excluded.verification_notes,
+          status = excluded.status,
+          is_fixture = excluded.is_fixture,
+          updated_at = excluded.updated_at`,
+        params: [
+          story.id,
+          story.clusterId,
+          story.rank,
+          story.title,
+          story.shortTitle,
+          story.summary,
+          story.detailedSummary,
+          story.whyItsWeird,
+          story.category,
+          JSON.stringify(story.tags),
+          story.country,
+          story.region,
+          story.eventDate,
+          story.publicationDate,
+          story.discoveredAt,
+          story.absurdityScore,
+          story.noveltyScore,
+          story.humorScore,
+          story.seriousnessScore,
+          story.credibilityScore,
+          story.confidence,
+          story.seriousness,
+          story.verificationNotes,
+          story.status,
+          story.isFixture ? 1 : 0,
+          now,
+          now,
+        ],
+      },
+      { sql: "DELETE FROM story_sources WHERE story_id = ?", params: [story.id] },
+      ...story.sources.map((source) => ({
+        sql: "INSERT INTO story_sources (story_id, publisher, url, published_at, source_type) VALUES (?, ?, ?, ?, ?)",
+        params: [story.id, source.publisher, source.url, source.publishedAt, source.sourceType],
+      })),
+      { sql: "DELETE FROM research_steps WHERE story_id = ?", params: [story.id] },
+      ...story.research.map((step, index) => ({
+        sql: "INSERT INTO research_steps (story_id, ordinal, label, detail, status, at_value) VALUES (?, ?, ?, ?, ?, ?)",
+        params: [story.id, index, step.label, step.detail, step.status, step.at],
+      })),
+    ];
 
-    await database.execute("DELETE FROM story_sources WHERE story_id = ?", [story.id]);
-    for (const source of story.sources) {
-      await database.execute(
-        "INSERT INTO story_sources (story_id, publisher, url, published_at, source_type) VALUES (?, ?, ?, ?, ?)",
-        [story.id, source.publisher, source.url, source.publishedAt, source.sourceType],
-      );
-    }
-
-    await database.execute("DELETE FROM research_steps WHERE story_id = ?", [story.id]);
-    for (const [index, step] of story.research.entries()) {
-      await database.execute(
-        "INSERT INTO research_steps (story_id, ordinal, label, detail, status, at_value) VALUES (?, ?, ?, ?, ?, ?)",
-        [story.id, index, step.label, step.detail, step.status, step.at],
-      );
-    }
+    await database.batch(statements, true);
   }
 }
 
@@ -390,9 +388,11 @@ export const storyRepository: StoryRepository =
 
 // Full source bodies stay out of the public reader payloads.
 export async function saveStoryEvidence(storyId: string, evidence: IngestedEvidence[]) {
+  if (!evidence.length) return;
+
   const database = await getDatabase();
-  for (const item of evidence) {
-    await database.execute(`INSERT INTO story_evidence (
+  const statements: SqlStatement[] = evidence.map((item) => ({
+    sql: `INSERT INTO story_evidence (
       story_id, url, publisher, title, resolved_url, published_at, fetched_at, status,
       method, body_text, original_length, truncated, content_hash, error
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -402,10 +402,12 @@ export async function saveStoryEvidence(storyId: string, evidence: IngestedEvide
       method = excluded.method, body_text = excluded.body_text, original_length = excluded.original_length,
       truncated = excluded.truncated, content_hash = excluded.content_hash, error = excluded.error
     WHERE story_evidence.status != 'article' OR (excluded.status = 'article' AND (story_evidence.truncated = 1 OR excluded.truncated = 0))`,
-    [storyId, item.url, item.publisher, item.title, item.resolvedUrl, item.publishedAt ?? null,
+    params: [storyId, item.url, item.publisher, item.title, item.resolvedUrl, item.publishedAt ?? null,
       item.fetchedAt, item.status, item.method, item.text, item.originalLength, item.truncated ? 1 : 0,
-      item.contentHash, item.error ?? null]);
-  }
+      item.contentHash, item.error ?? null],
+  }));
+
+  await database.batch(statements, true);
 }
 
 export async function getStoryEvidence(storyId: string): Promise<IngestedEvidence[]> {

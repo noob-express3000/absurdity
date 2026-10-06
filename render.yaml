@@ -5,12 +5,14 @@ services:
     plan: free
     region: frankfurt
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    startCommand: npm run db:check && npm start
     healthCheckPath: /api/health
     autoDeployTrigger: checksPass
     envVars:
       - key: ABSURDITY_MODE
         value: live
+      - key: ABSURDITY_REQUIRE_TURSO
+        value: "true"
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
