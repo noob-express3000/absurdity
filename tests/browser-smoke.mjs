@@ -126,6 +126,10 @@ await page.waitForTimeout(500);
 assert.equal(await page.evaluate(()=>window.qaSaid.length),saidBefore);
 assert.equal(await page.locator('a[target="_blank"]').count()>0,true);
 assert.equal(await page.evaluate(()=>document.querySelector('.story-text')?.nextElementSibling?.classList.contains('source-section')),true);
+const metaFooter = page.locator('footer[aria-label="Story date and verification"]');
+await metaFooter.waitFor();
+assert.match(await metaFooter.innerText(), /2026/);
+assert.match(await metaFooter.innerText(), /verification/i);
 for (const viewport of [{width:1366,height:768},{width:1280,height:720},{width:360,height:640},{width:844,height:390}]) {
   await page.setViewportSize(viewport);
   const bounds=await page.evaluate(()=>({width:document.documentElement.scrollWidth,height:document.documentElement.scrollHeight,viewportWidth:innerWidth,viewportHeight:innerHeight}));
