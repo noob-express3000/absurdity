@@ -9,7 +9,7 @@ import { demoBriefing } from '../lib/demo-data';
 import { PersistentStoryRepository, recordResearchRun, getLatestResearchRun, storyRepository } from '../lib/repository';
 import { GroqIntelligenceProvider } from '../lib/providers/intelligence';
 import { ElevenLabsVoiceProvider } from '../lib/providers/voice';
-import { assertDatabaseReady } from '../lib/database';
+import { assertDatabaseReady, getDatabase } from '../lib/database';
 
 before(() => {
   process.env.ABSURDITY_MODE = 'demo';
@@ -120,6 +120,37 @@ test('persistent stories roundtrip with sources and research, retain old history
   assert.equal((await repository.searchStories('%')).length,0);
   assert.equal(await repository.getStory('missing'), null);
 });
+test('history archive hydrates any number of stories in three database queries', async () => {
+  const repository = new PersistentStoryRepository();
+  for (let index = 0; index < 8; index++) {
+    await repository.upsertStory({
+      ...demoBriefing.stories[index % demoBriefing.stories.length],
+      id: 'qa-batch-' + index,
+      publicationDate: new Date(Date.now() - index * 1000).toISOString(),
+      isFixture: false,
+    });
+  }
+
+  const database = await getDatabase();
+  const originalQuery = database.query.bind(database);
+  let queries = 0;
+  (database as any).query = async (...args: any[]) => {
+    queries += 1;
+    return originalQuery(...args);
+  };
+
+  try {
+    const stories = await repository.searchStories('', 500);
+    assert.ok(stories.length >= 8);
+    assert.equal(queries, 3);
+    const batched = stories.find(story => story.id === 'qa-batch-0');
+    assert.ok(batched?.sources.length);
+    assert.ok(batched?.research.length);
+  } finally {
+    (database as any).query = originalQuery;
+  }
+});
+
 test('archive validates date filters and applies them before limiting results', async () => {
   assert.equal((await storiesGet(new Request('http://localhost/api/stories?from=invalid'))).status,400);
   const result = await (await storiesGet(new Request('http://localhost/api/stories?before=2020-01-01T00:00:00.000Z'))).json();
