@@ -35,7 +35,7 @@ export async function GET(request: Request) {
       before: before ? new Date(before).toISOString() : undefined,
     });
     return NextResponse.json({
-      mode: process.env.ABSURDITY_MODE === "live" ? "live" : "demo",
+      mode: process.env.ABSURDITY_MODE === "demo" ? "demo" : "live",
       stories,
     });
   } catch (error) {
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: "Story archive is temporarily unavailable.",
-        mode: process.env.ABSURDITY_MODE === "live" ? "live" : "demo",
+        mode: process.env.ABSURDITY_MODE === "demo" ? "demo" : "live",
       },
       { status: 503 },
     );
