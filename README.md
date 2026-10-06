@@ -32,20 +32,20 @@ The application has three primary tabs:
 The main reading layout intentionally stays simple:
 
 1. story-title list on the left;
-2. selected story followed by source links in the main reading pane;
+2. selected story followed by source links and a compact date/verification footer in the main reading pane;
 3. small narration and navigation controls at the bottom.
 
 The whole reader fits one viewport. The title list and article scroll internally. Search and date fields are handled by agent instructions instead of occupying the default interface. If speech recognition is unavailable or microphone access is denied, a compact instruction box appears.
 
 On the New stories tab, a story can be dismissed with the × control or a left swipe. Favorites and dismissed-state currently persist in browser `localStorage`.
 
-The seeded Demo Mode anchors its 48-hour window to the newest fixture date so the interaction can still be tested after the fixture dates become old. Live Mode should use wall-clock time.
+The seeded Demo Mode is an explicit local/QA fixture mode only. It anchors its 48-hour window to the newest fixture date so interaction tests stay useful after fixture dates age. Production does not fall back to fixtures: unless `ABSURDITY_MODE=demo` is explicitly set, the reader uses persistent live storage and wall-clock time.
 
 ## Current implementation
 
 - Next.js / React / TypeScript
 - Tailwind CSS
-- seven seeded demonstration stories
+- explicit seven-story fixture mode for local/QA only; live mode never substitutes fixtures
 - New stories / Favorites / History navigation
 - 48-hour home-feed rule
 - permanent demo archive view
@@ -60,6 +60,7 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - Exa-first global discovery with RSS secondary/fallback coverage and explicit refresh cycles
 - Turso Cloud production persistence with SQLite local fallback
 - permanent story/source/research-run archive
+- constant-query archive hydration: History loads story rows, sources and research steps in three database queries instead of two extra queries per story
 - scheduled deep-research pipeline
 - source-aware clustering and deduplication
 - Groq shortlist analysis with Exa as the primary discovery/corroboration provider and Tavily as corroboration fallback
@@ -84,7 +85,7 @@ Where the browser exposes the Web Speech recognition API, the interface understa
 - `find stories on 2026-10-01`
 - `find animal stories in my favorites`
 
-Navigation searches only stored stories when requested. Explicit instructions such as `refresh the stories` or `fetch new stories` start the same ingestion cycle as the app icon; questions and archive searches never start discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
+Navigation searches only stored stories when requested. Explicit instructions such as `refresh the stories` or `fetch new stories` start the same ingestion cycle as the **Refresh** control; the question-mark logo and Home are navigation only. Questions and archive searches never start discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
 
 The microphone uses browser speech recognition. Simple commands stay local for fast navigation; questions, conversational instructions and requested searches go to Groq through `/api/chat`. Groq receives the selected article, visible titles and the last eight conversation turns, and returns a validated reader action plus a grounded reply. Searches query only the stored archive. Conversation history stays in page memory. The chat button opens an empty, compact typed input with no command list, placeholder or explanatory text, also available automatically if microphone access is denied or recognition is unsupported.
 
@@ -161,7 +162,7 @@ Daily research now retrieves up to three source pages per shortlisted story and 
 
 Full extracted text is stored in `story_evidence` alongside publisher, requested/final URLs, publication/retrieval timestamps, extraction status and a SHA-256 content hash. The reader APIs return summaries and source links without shipping full evidence bodies for every archived story. Bodies over 120,000 characters are explicitly marked as clipped; model evidence has a shared 24,000-character budget with separate clipping markers. Ordinary article bodies that fit are sent in full, replacing the former 1,600-character per-source cap.
 
-Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research and explicit app-icon fetch cycles. Ordinary reader navigation never starts research. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
+Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research and explicit Refresh fetch cycles. Ordinary reader navigation never starts research. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
 
 ## Render deployment
 
@@ -173,7 +174,7 @@ Blocked, restricted, non-HTML and unreadable pages retain the available RSS/sear
 - build: `npm ci && npm run build`
 - start: `npm run db:check && npm start`
 - health check: `/api/health`
-- deployed mode: `ABSURDITY_MODE=live` (local default: demo)
+- deployed mode: `ABSURDITY_MODE=live`; the code defaults to persistent live mode unless `ABSURDITY_MODE=demo` is explicitly set (the sample `.env.example` opts local fixture testing into demo)
 
 Provider secrets belong in the Render service environment and should never be committed.
 
@@ -204,7 +205,7 @@ Run the deep pipeline manually with:
 npm run research:daily
 ```
 
-For zero-idle-cost scheduling, `.github/workflows/research.yml` is scheduled for 03:17 UTC (05:17 Johannesburg) once per day when the repository variable `ENABLE_DAILY_RESEARCH=true` is set. Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as repository secrets. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
+For zero-idle-cost scheduling, `.github/workflows/research.yml` runs at 03:17 UTC (05:17 Johannesburg) once per day by default. Set the repository variable `ENABLE_DAILY_RESEARCH=false` only as an emergency quota kill switch; manual dispatch remains available. Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as repository secrets. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
 
 Render remains the web host while Turso owns the persistent archive. Both Render and the GitHub Actions research job use the same Turso database, so the free Render filesystem is never treated as durable storage.
 
@@ -212,4 +213,4 @@ The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Gr
 
 ## Reader layout and QA
 
-The current interface follows the October notebook: story titles, story text, source links directly after the article and small read/talk controls, all within a single viewport. The reader shows only the story title, article, source links and essential controls. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.
+The current interface follows the October notebook: story titles, story text, source links directly after the article, a compact publication-date/verification footer, and small read/talk controls, all within a single viewport. The reader keeps metadata intentionally quiet while preserving the date and verification signal. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.
