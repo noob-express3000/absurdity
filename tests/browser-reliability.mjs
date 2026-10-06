@@ -37,15 +37,19 @@ try {
   assert.equal(await archiveAlert.count(), 0);
 
   phase = 'unavailable';
+  const passiveResponse = page.waitForResponse(response => response.url().includes('/api/stories?'));
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await archiveAlert.waitFor();
+  await passiveResponse;
+  assert.equal(await archiveAlert.count(), 0, 'passive refresh failure must not interrupt a loaded archive');
   assert.equal(await page.getByRole('heading', { name: story.title, exact: true }).count(), 1, 'failed background load preserves cached stories');
   phase = 'live';
-  await page.getByRole('button', { name: 'Retry loading stories' }).click();
-  await archiveAlert.waitFor({ state: 'hidden' });
-  assert.equal(researchPosts, 0, 'archive retry must not spend research quota');
+  const recoveryResponse = page.waitForResponse(response => response.url().includes('/api/stories?'));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await recoveryResponse;
+  assert.equal(await archiveAlert.count(), 0);
+  assert.equal(researchPosts, 0, 'passive archive recovery must not spend research quota');
   assert.deepEqual(errors, []);
-  console.log('PASS archive failure, malformed response, retry recovery, cached-story retention, no implicit demo or research, no page errors');
+  console.log('PASS initial archive failure, explicit retry recovery, silent passive refresh failure/recovery, cached-story retention, no implicit demo or research, no page errors');
 } finally {
   await browser.close();
 }
