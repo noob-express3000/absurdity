@@ -15,6 +15,7 @@ type VoiceState = "idle" | "loading" | "playing";
 const FAVORITES_KEY = "absurdity:favorites:v1";
 const DISMISSED_KEY = "absurdity:dismissed:v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+const ARCHIVE_REFRESH_MS = 5 * 60 * 1000;
 
 function cycleSummary(run: ResearchCycle) {
   return `Reviewed ${run.candidates} candidates; selected ${run.selected} ${run.selected === 1 ? "story" : "stories"}.`;
@@ -111,6 +112,24 @@ export default function Home() {
         }
       }).catch(() => {});
     return () => { controller.abort(); fetchControllerRef.current?.abort(); };
+  }, [reloadArchive]);
+
+  useEffect(() => {
+    function refreshVisibleArchive() {
+      if (document.visibilityState === "visible" && !fetchBusyRef.current) {
+        void reloadArchive().catch(() => {});
+      }
+    }
+
+    const timer = window.setInterval(refreshVisibleArchive, ARCHIVE_REFRESH_MS);
+    window.addEventListener("focus", refreshVisibleArchive);
+    document.addEventListener("visibilitychange", refreshVisibleArchive);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshVisibleArchive);
+      document.removeEventListener("visibilitychange", refreshVisibleArchive);
+    };
   }, [reloadArchive]);
 
   useEffect(() => {
