@@ -94,10 +94,16 @@ button {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   min-height: 40px;
-  padding: 2px 4px 2px 0;
-  border-radius: 12px;
+}
+
+.brand-home {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 4px 0 0;
+  border-radius: 8px;
 }
 
 .brand-name {
@@ -112,6 +118,7 @@ button {
   place-items: center;
   width: 34px;
   height: 34px;
+  padding: 0;
   border: 1px solid rgba(255,255,255,.72);
   border-radius: 11px;
   color: white;
@@ -122,12 +129,12 @@ button {
   line-height: 1;
 }
 
-.brand:hover .brand-icon {
+.brand-icon:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 20px rgba(84, 68, 192, .22);
 }
 
-.brand:hover .brand-name { color: #373642; }
+.brand-home:hover .brand-name { color: #373642; }
 
 .tabs {
   display: flex;
@@ -671,8 +678,10 @@ button {
 
   .brand {
     gap: 7px;
-    height: 36px;
+    min-height: 36px;
   }
+
+  .brand-home { min-height: 32px; }
 
   .brand-name {
     font-size: 13px;

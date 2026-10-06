@@ -608,10 +608,14 @@ export default function Home() {
   return (
     <main className="reader-app">
       <header className="app-header">
-        <button className="brand" onClick={() => { if (!fetchBusyRef.current && homeStories.length) changeTab("home"); void fetchStories(); }} aria-label="New stories" aria-busy={fetching} aria-current={tab === "home" ? "page" : undefined} title={fetching ? "Fetching stories…" : "Fetch new stories"}>
-          <span className="brand-icon" aria-hidden="true">{fetching ? <svg className="loading-ring" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : "A"}</span>
-          <h1 className="brand-name">Absurdity</h1>
-        </button>
+        <div className="brand">
+          <button className="brand-icon" onClick={() => void fetchStories()} aria-label="Fetch new stories" aria-busy={fetching} title={fetching ? "Fetching stories…" : "Fetch new stories"}>
+            {fetching ? <svg className="loading-ring" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : <span aria-hidden="true">A</span>}
+          </button>
+          <button className="brand-home" onClick={() => changeTab("home")} aria-label="New stories" aria-current={tab === "home" ? "page" : undefined}>
+            <h1 className="brand-name">Absurdity</h1>
+          </button>
+        </div>
         <nav className="tabs" aria-label="Story views">
           {([ ["favorites", "Favorites"], ["history", "History"] ] as const).map(([id, label]) => (
             <button key={id} onClick={() => changeTab(id)} aria-current={tab === id ? "page" : undefined}>
