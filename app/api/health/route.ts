@@ -13,6 +13,10 @@ export async function GET() {
       mode: process.env.ABSURDITY_MODE === "demo" ? "demo" : "live",
       runtime: "node",
       render: process.env.RENDER === "true",
+      deployment: process.env.RENDER === "true" ? {
+        commit: process.env.RENDER_GIT_COMMIT?.slice(0, 8) || null,
+        url: process.env.RENDER_EXTERNAL_URL || null,
+      } : null,
       database,
       providers: {
         groq: Boolean(process.env.GROQ_API_KEY),
@@ -25,6 +29,7 @@ export async function GET() {
       research: {
         windowHours: Number(process.env.RESEARCH_WINDOW_HOURS || 30),
         maxCandidates: Number(process.env.RESEARCH_MAX_CANDIDATES || 12),
+        exaResultsPerQuery: Number(process.env.EXA_DISCOVERY_RESULTS_PER_QUERY || 6),
       },
     },
     {
