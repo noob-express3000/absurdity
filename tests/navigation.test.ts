@@ -37,3 +37,12 @@ test('exact dates use Johannesburg publication days and invalid dates are reject
   assert.equal(lastWeek.action,'search');
   if(lastWeek.action==='search') assert.equal(Date.parse(lastWeek.from!),clock-7*86400000);
 });
+
+ test('only explicit fetch requests refresh; archive searches and questions remain navigation', () => {
+  for (const text of ['refresh', 'Refresh the stories', 'please refresh my feed', 'could you fetch new stories please', 'get me some more stories', 'update the news', 'reload the briefing']) {
+    assert.deepEqual(parseNavigation(text, 'history', clock), { action: 'refresh' }, text);
+  }
+  for (const text of ["don't refresh the stories", 'why does refresh clear the page', 'what happens when I refresh', 'find stories about refresh rates', 'show new stories']) {
+    assert.notEqual(parseNavigation(text, 'history', clock).action, 'refresh', text);
+  }
+});

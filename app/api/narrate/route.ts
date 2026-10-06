@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ElevenLabsVoiceProvider } from "@/lib/providers/voice";
+import { ElevenLabsVoiceProvider, NarrationError } from "@/lib/providers/voice";
 
 export async function POST(request: Request) {
   try {
@@ -13,7 +13,10 @@ export async function POST(request: Request) {
     const provider = new ElevenLabsVoiceProvider();
     if (!provider.available()) {
       return NextResponse.json(
-        { error: "ElevenLabs is not configured.", fallback: "browser-speech" },
+        { error: !process.env.ELEVENLABS_API_KEY?.trim()
+          ? "Set ELEVENLABS_API_KEY in Render and redeploy."
+          : "Set ELEVENLABS_VOICE_ID in Render and redeploy; the API key alone is not enough.",
+          code: "not_configured", fallback: "browser-speech" },
         { status: 503 },
       );
     }
@@ -26,9 +29,14 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("Narration route failed.", error);
+    const known = error instanceof NarrationError;
+    const timeout = error instanceof Error && error.name === "TimeoutError";
+    console.error("Narration route failed.", { code: known ? error.code : timeout ? "timeout" : "connection_error",
+      providerStatus: known ? error.providerStatus : undefined });
     return NextResponse.json(
-      { error: "Narration failed safely.", fallback: "browser-speech" },
+      { error: known ? error.message : timeout ? "ElevenLabs took too long to respond. Try again."
+        : "Could not connect to ElevenLabs. Try again shortly.",
+        code: known ? error.code : timeout ? "timeout" : "connection_error", fallback: "browser-speech" },
       { status: 502 },
     );
   }

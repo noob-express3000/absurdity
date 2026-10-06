@@ -1,13 +1,17 @@
 export type StoryView = "home" | "favorites" | "history";
 export type NavigationRequest =
-  | { action: "next" | "previous" | "favorite" | "dismiss" | "read" | "stop" | "stop-listening" }
+  | { action: "next" | "previous" | "favorite" | "dismiss" | "read" | "stop" | "stop-listening" | "refresh" }
   | { action: "view"; view: StoryView }
   | { action: "search"; query: string; view: StoryView; from?: string; before?: string }
   | { action: "unknown" };
 
-// These instructions navigate the stored archive; they never launch research.
+// Archive navigation stays local; only an explicit refresh request launches research.
 export function parseNavigation(raw: string, currentView: StoryView, now: number): NavigationRequest {
   const command = raw.toLowerCase().trim().replace(/[.!?]+$/, "").replace(/^please\s+/, "");
+  const refresh = command.replace(/^(?:can|could|would) you (?:please )?/, "")
+    .replace(/^please\s+/, "").replace(/\s+(?:please|again|now)$/, "");
+  if (/^(?:refresh|reload)$/.test(refresh) ||
+      /^(?:refresh|reload|update|fetch|retrieve|get|check for) (?:me )?(?:(?:the|my|our|some|more|new|latest|fresh|current|all) )*(?:stories|news|feed|briefing)$/.test(refresh)) return { action: "refresh" };
   if (/^(?:go to |open |show |show my |my )?(?:favorites|favourites)$/.test(command)) return { action: "view", view: "favorites" };
   if (/^(?:go to |open |show )?(?:history|archive|all stories)$/.test(command)) return { action: "view", view: "history" };
   if (/^(?:go to |open |show )?(?:home|new stories)$/.test(command)) return { action: "view", view: "home" };

@@ -1,6 +1,6 @@
 import type { StoryView } from './navigation';
 
-export const conversationActions = ['none', 'view', 'next', 'previous', 'select', 'favorite', 'unfavorite', 'dismiss', 'read', 'search'] as const;
+export const conversationActions = ['none', 'view', 'next', 'previous', 'select', 'favorite', 'unfavorite', 'dismiss', 'read', 'search', 'refresh'] as const;
 export type ConversationAction = typeof conversationActions[number];
 export type ConversationTurn = { role: 'user' | 'assistant'; content: string };
 export type ConversationPlan = {

@@ -81,3 +81,28 @@ test('voice route limits oversized requests and deterministic search works witho
   assert.equal(body.action.view,'favorites');
   assert.equal(body.provider,'deterministic');
 });
+
+test('explicit refresh returns a real refresh action without asking Groq or searching the archive', async () => {
+  const original = globalThis.fetch;
+  const search = storyRepository.searchStories;
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    globalThis.fetch = async () => { throw new Error('Must not ask Groq to interpret refresh'); };
+    storyRepository.searchStories = async () => { throw new Error('Must not search for the word refresh'); };
+    const result = await replyToVoice({...context, message:'Refresh the stories'});
+    assert.equal(result.action.action, 'refresh');
+    assert.equal(result.intent, 'refresh');
+    assert.equal(result.stories, undefined);
+    assert.doesNotMatch(result.text, /have been refreshed/);
+  } finally {globalThis.fetch=original;storyRepository.searchStories=search;delete process.env.GROQ_API_KEY;}
+});
+
+test('a model cannot initiate refresh from an unrelated request', async () => {
+  const original = globalThis.fetch;
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    globalThis.fetch = async () => Response.json({output_text:JSON.stringify({...plan,action:'refresh'})});
+    const result = await replyToVoice({...context,message:'Hello'});
+    assert.notEqual(result.action.action,'refresh');
+  } finally {globalThis.fetch=original;delete process.env.GROQ_API_KEY;}
+});

@@ -11,6 +11,9 @@ export type ResearchCycle = {
   startedAt: string;
   completedAt: string | null;
   selected: number;
+  scanned: number;
+  candidates: number;
+  articlesExtracted: number;
   retryAt: string;
 };
 
@@ -24,13 +27,15 @@ export async function getResearchCycle(id?: string): Promise<ResearchCycle | nul
   [new Date(now).toISOString(), new Date(now - LEASE_MS).toISOString()]);
   const rows = await db.query<{
     id: string; status: ResearchCycle["status"]; started_at: string;
-    completed_at: string | null; selected: number; next_manual_at: number;
+    completed_at: string | null; selected: number; scanned: number; candidates: number; provider_usage_json: string; next_manual_at: number;
   }>(`SELECT r.*, COALESCE(l.next_manual_at, 0) AS next_manual_at
     FROM research_runs r LEFT JOIN research_lease l ON l.run_id = r.id
     ${id ? "WHERE r.id = ?" : ""} ORDER BY r.started_at DESC LIMIT 1`, id ? [id] : []);
   const row = rows[0];
+  const usage = row ? JSON.parse(row.provider_usage_json) : {};
   return row ? { id: row.id, status: row.status, startedAt: row.started_at,
-    completedAt: row.completed_at, selected: Number(row.selected),
+    completedAt: row.completed_at, selected: Number(row.selected), scanned: Number(row.scanned),
+    candidates: Number(row.candidates), articlesExtracted: Number(usage.articlesExtracted || 0),
     retryAt: new Date(Number(row.next_manual_at)).toISOString() } : null;
 }
 
@@ -50,7 +55,7 @@ export async function claimResearch(manual = true) {
     const run = await getResearchCycle(lease.run_id);
     return { acquired: false, run: run ?? { id: lease.run_id, status: "running" as const,
       startedAt: new Date(Number(lease.expires_at) - LEASE_MS).toISOString(),
-      completedAt: null, selected: 0, retryAt: new Date(Number(lease.next_manual_at)).toISOString() } };
+      completedAt: null, selected: 0, scanned: 0, candidates: 0, articlesExtracted: 0, retryAt: new Date(Number(lease.next_manual_at)).toISOString() } };
   }
   try {
     await recordResearchRun({ id, startedAt: new Date(now).toISOString(),

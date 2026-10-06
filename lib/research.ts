@@ -9,7 +9,9 @@ export type DiscoveredCandidate = {
   localScore: number;
 };
 
-const FEEDS = [
+export const RESEARCH_FEEDS = [
+  { publisher: "UPI Odd News", url: "https://rss.upi.com/news/odd_news.rss", oddNews: true },
+  { publisher: "Guardian World", url: "https://www.theguardian.com/world/rss" },
   { publisher: "BBC World", url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
   { publisher: "ABC News Australia", url: "https://www.abc.net.au/news/feed/51120/rss.xml" },
   { publisher: "NPR World", url: "https://feeds.npr.org/1004/rss.xml" },
@@ -44,16 +46,18 @@ export function scoreHeadlineLocally(title: string, snippet = "") {
   return Math.min(score, 100);
 }
 
-export async function runLightweightDiscovery() {
+export async function runLightweightDiscovery(options: {
+  parseFeed?: (url: string) => Promise<{ items: Parser.Item[] }>;
+} = {}) {
   const parser = new Parser({ timeout: 15000 });
   const candidates: DiscoveredCandidate[] = [];
   const failures: string[] = [];
 
   await Promise.all(
-    FEEDS.map(async (feed) => {
+    RESEARCH_FEEDS.map(async (feed) => {
       try {
-        const parsed = await parser.parseURL(feed.url);
-        for (const item of parsed.items.slice(0, 35)) {
+        const parsed = await (options.parseFeed ?? (url => parser.parseURL(url)))(feed.url);
+        for (const item of parsed.items.slice(0, 60)) {
           if (!item.title || !item.link) continue;
           const snippet = item.contentSnippet || item.content || "";
           candidates.push({
@@ -62,7 +66,7 @@ export async function runLightweightDiscovery() {
             publisher: feed.publisher,
             publishedAt: item.isoDate || item.pubDate,
             snippet: snippet.slice(0, 400),
-            localScore: scoreHeadlineLocally(item.title, snippet),
+            localScore: Math.max(scoreHeadlineLocally(item.title, snippet), "oddNews" in feed ? 12 : 0),
           });
         }
       } catch {
@@ -77,8 +81,9 @@ export async function runLightweightDiscovery() {
   return {
     scanned: deduped.length,
     unusualCandidates: deduped.filter((item) => item.localScore > 0).length,
-    candidates: deduped.slice(0, 15),
+    // Date filtering and event clustering must happen before the shortlist cap.
+    candidates: deduped,
     failures,
-    note: "This endpoint performs lightweight RSS collection and deterministic triage only. Deep AI research is intentionally separate.",
+    note: "RSS collection and deterministic triage; the pipeline applies its date window and candidate cap after clustering.",
   };
 }

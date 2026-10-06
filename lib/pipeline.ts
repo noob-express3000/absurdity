@@ -216,7 +216,7 @@ async function executeResearch(options: {
     const inWindow = discovery.candidates.filter((candidate) => {
       if (!candidate.publishedAt) return true;
       const time = new Date(candidate.publishedAt).getTime();
-      return Number.isFinite(time) ? time >= windowStart.getTime() : true;
+      return Number.isFinite(time) ? time >= windowStart.getTime() && time <= Date.now() : true;
     });
 
     const groups = clusterCandidates(inWindow.filter((candidate) => candidate.localScore > 0))
@@ -337,7 +337,8 @@ async function executeResearch(options: {
 
       const uniqueSources = Array.from(new Map(sources.map((source) => [source.url, source])).values());
       const canPromote = analysis.selected && analysis.confidence !== "low";
-      const publicationDate = primary.publishedAt || startedAt.toISOString();
+      const publicationTime = primary.publishedAt ? Date.parse(primary.publishedAt) : NaN;
+      const publicationDate = Number.isFinite(publicationTime) ? new Date(publicationTime).toISOString() : startedAt.toISOString();
       const eventDate = analysis.eventDate || publicationDate;
       const story: Story = {
         id: makeStoryId(group),

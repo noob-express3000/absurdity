@@ -105,7 +105,7 @@ await command('stop listening');
 if (await page.getByRole('button',{name:'Dismiss reply'}).count()) await page.getByRole('button',{name:'Dismiss reply'}).click();
 await page.route('**/api/research*', route => route.fulfill({json:{run:{id:'qa-fetch',status:'complete',selected:0},started:false}}));
 await page.getByRole('button',{name:'New stories',exact:true}).click();
-await page.getByText('Stories refreshed. A new fetch is available in a few minutes.').waitFor();
+await page.getByText('The last fetch is still recent. A new fetch is available in a few minutes.').waitFor();
 const before=await page.locator('.story-row').count();
 await page.getByRole('button',{name:'Dismiss story',exact:true}).first().click();
 assert.equal(await page.locator('.story-row').count(),before-1);

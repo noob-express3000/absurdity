@@ -16,6 +16,10 @@ const FAVORITES_KEY = "absurdity:favorites:v1";
 const DISMISSED_KEY = "absurdity:dismissed:v1";
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
+function cycleSummary(run: ResearchCycle) {
+  return `Reviewed ${run.candidates} candidates; selected ${run.selected} ${run.selected === 1 ? "story" : "stories"}.`;
+}
+
 function parseStoredIds(key: string) {
   try {
     const raw = localStorage.getItem(key);
@@ -52,7 +56,9 @@ export default function Home() {
   const [fetching, setFetching] = useState(false);
   const [cycleId, setCycleId] = useState<string | null>(null);
   const [fetchHint, setFetchHint] = useState("");
+  const [narrationHint, setNarrationHint] = useState("");
   const fetchBusyRef = useRef(false);
+  const fetchReplyRef = useRef(false);
   const archiveRequestRef = useRef(0);
   const fetchControllerRef = useRef<AbortController | null>(null);
   const anchorTime = useMemo(() => (usingLive ? Date.now() : demoClock()), [usingLive, remoteStories]);
@@ -82,8 +88,9 @@ export default function Home() {
     const payload = await response.json();
     if (signal?.aborted || requestId !== archiveRequestRef.current) return;
     const mode = payload?.mode === "live" ? "live" : "demo";
-    setDataMode(mode);
-    if (mode === "live" && Array.isArray(payload?.stories)) {
+    // A transient empty response must not discard a readable archive.
+    if (mode === "live" && Array.isArray(payload?.stories) && payload.stories.length) {
+      setDataMode(mode);
       setRemoteStories(payload.stories as Story[]);
       if (payload.stories.length) setSelectedId(current =>
         payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
@@ -122,14 +129,21 @@ export default function Home() {
         if (run.status === "running") { failures = 0; timer = setTimeout(check, 2500); return; }
         if (run.status === "failed") { failures = 3; throw new Error("Fetch interrupted. Try again shortly."); }
         await reloadArchive(controller.signal);
-        if (!controller.signal.aborted) setFetchHint("Stories refreshed.");
+        if (!controller.signal.aborted) {
+          const text = cycleSummary(run);
+          if (fetchReplyRef.current) { setFetchHint(""); setAgentReply(text); }
+          else setFetchHint(text);
+        }
       } catch (error) {
         if (controller.signal.aborted) return;
         if (++failures < 3) { timer = setTimeout(check, 4000); return; }
-        setFetchHint(error instanceof Error ? error.message : "Fetch failed. Try again shortly.");
+        const text = error instanceof Error ? error.message : "Fetch failed. Try again shortly.";
+        if (fetchReplyRef.current) { setFetchHint(""); setAgentReply(text); }
+        else setFetchHint(text);
       }
       if (!controller.signal.aborted) {
         fetchBusyRef.current = false;
+        fetchReplyRef.current = false;
         setFetching(false);
         setCycleId(null);
       }
@@ -144,9 +158,29 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [fetchHint]);
 
-  async function fetchStories() {
-    changeTab("home");
-    if (fetchBusyRef.current) return;
+  useEffect(() => {
+    if (!narrationHint) return;
+    const timer = setTimeout(() => setNarrationHint(""), 12000);
+    return () => clearTimeout(timer);
+  }, [narrationHint]);
+
+  function reportFetch(text: string, spoken: boolean) {
+    if (spoken) { setFetchHint(""); setAgentReply(text); void speakText(text); }
+    else setFetchHint(text);
+  }
+
+  async function fetchStories(spoken = false) {
+    if (fetchBusyRef.current) {
+      if (spoken) fetchReplyRef.current = true;
+      reportFetch("Already fetching stories.", spoken); return;
+    }
+    fetchReplyRef.current = spoken;
+    stopNarration();
+    // Recover from an empty search without clearing a story that is being read.
+    if (!visibleStories.length) {
+      setSearchResults(null);
+      if (!baseStories.length && stories.length) setTab("history");
+    }
     fetchBusyRef.current = true;
     setFetching(true);
     setFetchHint("");
@@ -156,12 +190,16 @@ export default function Home() {
       const response = await fetch("/api/research", { method: "POST", signal: controller.signal });
       const payload = await response.json();
       if (!response.ok || !payload.run) throw new Error(payload.error || "Could not start a fetch cycle.");
-      if (payload.run.status === "running") { setCycleId(payload.run.id); return; }
+      if (payload.run.status === "running") {
+        setCycleId(payload.run.id);
+        reportFetch(payload.started ? "Fetching stories." : "Already fetching stories.", spoken);
+        return;
+      }
       await reloadArchive(controller.signal);
-      setFetchHint(payload.run.status === "failed" ? "Fetch interrupted. Try again shortly."
-        : "Stories refreshed. A new fetch is available in a few minutes.");
+      reportFetch(payload.run.status === "failed" ? "Fetch interrupted. Try again shortly."
+        : "The last fetch is still recent. A new fetch is available in a few minutes.", spoken);
     } catch (error) {
-      if (!controller.signal.aborted) setFetchHint(error instanceof Error ? error.message : "Fetch failed.");
+      if (!controller.signal.aborted) reportFetch(error instanceof Error ? error.message : "Fetch failed.", spoken);
     }
     if (!controller.signal.aborted) { fetchBusyRef.current = false; setFetching(false); }
   }
@@ -278,12 +316,18 @@ export default function Home() {
       recognitionRef.current?.stop();
     }
     setVoiceState("loading");
+    setNarrationHint("");
     try {
       const response = await fetch("/api/narrate", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
       });
       if (requestId !== narrationRequestRef.current) return;
-      if (!response.ok) return browserSpeak(text, requestId);
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null);
+        if (requestId !== narrationRequestRef.current) return;
+        setNarrationHint(`${failure?.error || "ElevenLabs narration is unavailable."} Using device voice.`);
+        return browserSpeak(text, requestId);
+      }
       const blob = await response.blob();
       if (requestId !== narrationRequestRef.current) return;
       const url = URL.createObjectURL(blob);
@@ -297,12 +341,16 @@ export default function Home() {
       audio.onended = () => { release(); finishSpeech(requestId); };
       audio.onerror = () => {
         release();
-        if (requestId === narrationRequestRef.current) browserSpeak(text, requestId);
+        if (requestId === narrationRequestRef.current) {
+          setNarrationHint("Could not play ElevenLabs audio. Using device voice.");
+          browserSpeak(text, requestId);
+        }
       };
       setVoiceState("playing");
       await audio.play();
     } catch {
       if (requestId !== narrationRequestRef.current) return;
+      setNarrationHint("Narration connection or audio playback failed. Using device voice.");
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
       if (requestId === narrationRequestRef.current) browserSpeak(text, requestId);
@@ -386,6 +434,7 @@ export default function Home() {
       let text = reply.text;
       let target = plan.storyId ? stories.find(story => story.id === plan.storyId) : visibleStories.length ? selected : undefined;
       switch (plan.action) {
+        case "refresh": void fetchStories(true); return;
         case "view":
           if (plan.view) {
             changeTab(plan.view);
@@ -445,6 +494,7 @@ export default function Home() {
     const instruction = parseNavigation(raw, tab, usingLive ? Date.now() : anchorTime);
     setVoiceHint(`Heard: “${raw}”`);
     switch (instruction.action) {
+      case "refresh": void fetchStories(true); return;
       case "view": return changeTab(instruction.view);
       case "next": return selectAdjacent(1);
       case "previous": return selectAdjacent(-1);
@@ -534,7 +584,7 @@ export default function Home() {
   return (
     <main className="reader-app">
       <header className="app-header">
-        <button className="brand" onClick={fetchStories} aria-label="New stories" aria-busy={fetching} aria-current={tab === "home" ? "page" : undefined} title={fetching ? "Fetching stories…" : "Fetch new stories"}>
+        <button className="brand" onClick={() => { if (!fetchBusyRef.current && homeStories.length) changeTab("home"); void fetchStories(); }} aria-label="New stories" aria-busy={fetching} aria-current={tab === "home" ? "page" : undefined} title={fetching ? "Fetching stories…" : "Fetch new stories"}>
           <span className="brand-icon" aria-hidden="true">{fetching ? <svg className="loading-ring" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : "A"}</span>
           <h1 className="brand-name">Absurdity</h1>
         </button>
@@ -614,7 +664,7 @@ export default function Home() {
           </div>
         </article>
       </section>
-      {fetchHint && <div className="fetch-notice" role="status">{fetchHint}</div>}
+      {(fetchHint || narrationHint) && <div className="fetch-notice" role="status">{fetchHint || narrationHint}</div>}
       <div className="voice-status" role="status" aria-live="polite">
         {fetching ? "Fetching stories." : voiceHint}
       </div>

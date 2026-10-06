@@ -57,7 +57,7 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - event/publication date separation
 - ElevenLabs narration route with browser speech fallback
 - optional browser speech-recognition commands for hands-free navigation
-- lightweight RSS discovery endpoint
+- RSS discovery and explicit refresh cycles
 - Turso Cloud production persistence with SQLite local fallback
 - permanent story/source/research-run archive
 - scheduled deep-research pipeline
@@ -84,13 +84,13 @@ Where the browser exposes the Web Speech recognition API, the interface understa
 - `find stories on 2026-10-01`
 - `find animal stories in my favorites`
 
-Navigation searches only stored stories when requested; it does not invoke web research or discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
+Navigation searches only stored stories when requested. Explicit instructions such as `refresh the stories` or `fetch new stories` start the same ingestion cycle as the app icon; questions and archive searches never start discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
 
 The microphone uses browser speech recognition. Simple commands stay local for fast navigation; questions, conversational instructions and requested searches go to Groq through `/api/chat`. Groq receives the selected article, visible titles and the last eight conversation turns, and returns a validated reader action plus a grounded reply. Searches query only the stored archive. Conversation history stays in page memory. The chat button opens an empty, compact typed input with no command list, placeholder or explanatory text, also available automatically if microphone access is denied or recognition is unsupported.
 
 Set `GROQ_API_KEY` on the Render service to enable conversation; the default model is `openai/gpt-oss-120b`. This is a Groq-hosted model and uses no OpenAI API key. Without Groq, simple commands and deterministic archive searches remain available; live answers never fall back to fixture claims. Groq currently handles reasoning and navigation, while browser recognition handles speech-to-text.
 
-The play button or `read` reads the selected title and article through ElevenLabs when configured, falling back to browser text-to-speech when unavailable. Agent replies use the same playback pipeline. The microphone pauses during speech and resumes afterward until toggled off or told `stop listening`. Use the stop control to interrupt a reply; `stop` cancels narration or a pending conversation while listening. Changing the story or view also cancels pending work. The dock shows listening, thinking, preparing and speaking states.
+The play button or `read` reads the selected title and article through ElevenLabs when configured, falling back to browser text-to-speech when unavailable. Agent replies use the same playback pipeline. Both `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` must be set in Render and deployed; the key requires Text to Speech permission and access to the selected voice. Narration errors now show a short actionable notice before using device speech, including missing configuration, invalid voice, permissions and quota errors. Raw provider errors and secrets are never returned to the browser. The microphone pauses during speech and resumes afterward until toggled off or told `stop listening`. Use the stop control to interrupt a reply; `stop` cancels narration or a pending conversation while listening. Changing the story or view also cancels pending work. The dock shows listening, thinking, preparing and speaking states.
 
 ## Live research pipeline
 
@@ -98,9 +98,11 @@ The live system now has a real persisted pipeline:
 
 `DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → EXTRACT ARTICLES → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
 
-Clicking the app icon calls `POST /api/research` to start the full pipeline from `lib/pipeline.ts`. The response returns immediately; the icon spins while the reader polls `GET /api/research?id=…` and reloads the archive on completion. Reloading the page resumes an active cycle without launching another. Navigation and voice archive searches never initiate discovery.
+Clicking the app icon or explicitly asking the agent to refresh calls `POST /api/research` to start the full pipeline from `lib/pipeline.ts`. The response returns immediately; the icon spins while the reader polls `GET /api/research?id=…` and reloads the archive on completion. Reloading the page resumes an active cycle without launching another. The current reader remains usable during fetching. A transient empty archive response cannot discard an already loaded archive. Ordinary navigation and voice archive searches never initiate discovery. Completion reports how many candidates were reviewed and stories selected.
 
 A shared database lease prevents duplicate manual cycles and overlap with `npm run research:daily`. Manual starts have a five-minute shared cooldown. Background work uses Next.js `after()` on the Render Node server; a service restart can interrupt it, and a stale run becomes failed/retryable after 30 minutes. This is not a durable queue or continuous real-time news stream. The page fetches its archive on load and after a tracked cycle finishes; it does not continuously watch for externally saved stories.
+
+Discovery includes UPI Odd News, Guardian World, BBC World, ABC Australia and NPR World. It retains the full bounded RSS batch until the pipeline applies the date window, removes duplicate events, and caps candidate analysis. Provider failures and editorial rejection can still produce a small selected briefing.
 
 The scheduled pipeline also runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; Groq is used only after deterministic filtering and clustering.
 
@@ -157,7 +159,7 @@ Daily research now retrieves up to three source pages per shortlisted story and 
 
 Full extracted text is stored in `story_evidence` alongside publisher, requested/final URLs, publication/retrieval timestamps, extraction status and a SHA-256 content hash. The reader APIs return summaries and source links without shipping full evidence bodies for every archived story. Bodies over 120,000 characters are explicitly marked as clipped; model evidence has a shared 24,000-character budget with separate clipping markers. Ordinary article bodies that fit are sent in full, replacing the former 1,600-character per-source cap.
 
-Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research and explicit app-icon fetch cycles. Reader navigation never starts research. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
+Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research and explicit app-icon fetch cycles. Ordinary reader navigation never starts research. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
 
 ## Render deployment
 

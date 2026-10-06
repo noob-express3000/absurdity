@@ -28,6 +28,12 @@ function noAction(text: string): ConversationPlan {
 }
 
 export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
+  if (parseNavigation(context.message, context.scope, Date.now()).action === 'refresh') {
+    const text = 'Starting a story fetch. I will keep the reader open while it runs.';
+    return { text, action: { ...noAction(text), action: 'refresh' },
+      provider: 'deterministic', intent: 'refresh',
+      mode: context.displayMode ?? (process.env.ABSURDITY_MODE === 'live' ? 'live' : 'demo') };
+  }
   // The client explicitly identifies fixtures it is displaying when the live archive is empty.
   const repository = context.displayMode === 'demo' ? new DemoStoryRepository() : storyRepository;
   const briefing = await repository.getCurrentBriefing();
@@ -49,6 +55,7 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
     plan = await provider.planConversation(context.message, corpus, {
       storyId: current?.id, scope: context.scope, visibleIds: context.visibleIds, history: context.history, now: new Date(clock).toISOString(), mode,
     });
+    if (plan.action === 'refresh') throw new Error('Refresh requires an explicit refresh request.');
   } catch (error) {
     // Never substitute demo claims for a live conversation when a provider fails.
     console.warn('Voice conversation using grounded fallback:', error instanceof Error ? error.message : 'Provider failed');
