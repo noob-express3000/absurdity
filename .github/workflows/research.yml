@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   research:
-    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_DAILY_RESEARCH == 'true' }}
+    # Scheduled research is on by default. Set ENABLE_DAILY_RESEARCH=false as
+    # an emergency quota kill switch; manual dispatch always remains available.
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_DAILY_RESEARCH != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -23,6 +25,8 @@ jobs:
       ABSURDITY_MODE: live
       RESEARCH_WINDOW_HOURS: ${{ vars.RESEARCH_WINDOW_HOURS || '30' }}
       RESEARCH_MAX_CANDIDATES: ${{ vars.RESEARCH_MAX_CANDIDATES || '12' }}
+      EXA_DISCOVERY_RESULTS_PER_QUERY: ${{ vars.EXA_DISCOVERY_RESULTS_PER_QUERY || '6' }}
+      ABSURDITY_REQUIRE_TURSO: "true"
 
     steps:
       - uses: actions/checkout@v4
