@@ -39,8 +39,8 @@ function demoClock() {
 export default function Home() {
   const [remoteStories, setRemoteStories] = useState<Story[] | null>(null);
   const [dataMode, setDataMode] = useState<"demo" | "live">("demo");
-  const stories = remoteStories?.length ? remoteStories : demoBriefing.stories;
-  const usingLive = dataMode === "live" && Boolean(remoteStories?.length);
+  const stories = remoteStories ?? demoBriefing.stories;
+  const usingLive = dataMode === "live";
   const [tab, setTab] = useState<Tab>("home");
   const [selectedId, setSelectedId] = useState(demoBriefing.stories[0].id);
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -89,12 +89,17 @@ export default function Home() {
     const payload = await response.json();
     if (signal?.aborted || requestId !== archiveRequestRef.current) return;
     const mode = payload?.mode === "live" ? "live" : "demo";
-    // A transient empty response must not discard a readable archive.
-    if (mode === "live" && Array.isArray(payload?.stories) && payload.stories.length) {
-      setDataMode(mode);
-      setRemoteStories(payload.stories as Story[]);
-      if (payload.stories.length) setSelectedId(current =>
-        payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
+    if (mode === "live" && Array.isArray(payload?.stories)) {
+      setDataMode("live");
+      if (payload.stories.length) {
+        setRemoteStories(payload.stories as Story[]);
+        setSelectedId(current =>
+          payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
+      } else {
+        // An initially empty production archive is genuinely empty. Once live
+        // stories have loaded, a transient empty refresh must not erase them.
+        setRemoteStories(current => current === null ? [] : current);
+      }
     }
   }, []);
 
