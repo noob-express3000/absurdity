@@ -12,6 +12,7 @@ import { ElevenLabsVoiceProvider } from '../lib/providers/voice';
 import { assertDatabaseReady } from '../lib/database';
 
 before(() => {
+  process.env.ABSURDITY_MODE = 'demo';
   process.env.ABSURDITY_SQLITE_PATH = ':memory:';
   for (const key of ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'ABSURDITY_REQUIRE_TURSO', 'RENDER', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']) delete process.env[key];
 });
