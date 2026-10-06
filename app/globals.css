@@ -417,6 +417,23 @@ button {
   border-color: #d7d7d7;
 }
 
+.story-meta-footer {
+  max-width: 760px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #eeeeee;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.story-meta-footer span:last-child {
+  text-align: right;
+}
+
 .reader-bottom {
   position: absolute;
   right: 22px;
