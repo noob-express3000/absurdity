@@ -381,10 +381,20 @@ export async function getLatestResearchRun() {
   return rows[0] || null;
 }
 
-export const storyRepository: StoryRepository =
-  process.env.ABSURDITY_MODE === "demo"
-    ? new DemoStoryRepository()
-    : new PersistentStoryRepository();
+const demoStoryRepository = new DemoStoryRepository();
+const persistentStoryRepository = new PersistentStoryRepository();
+
+function activeStoryRepository(): StoryRepository {
+  return process.env.ABSURDITY_MODE === "demo"
+    ? demoStoryRepository
+    : persistentStoryRepository;
+}
+
+export const storyRepository: StoryRepository = {
+  getCurrentBriefing: () => activeStoryRepository().getCurrentBriefing(),
+  getStory: (id) => activeStoryRepository().getStory(id),
+  searchStories: (query, limit, dates) => activeStoryRepository().searchStories(query, limit, dates),
+};
 
 // Full source bodies stay out of the public reader payloads.
 export async function saveStoryEvidence(storyId: string, evidence: IngestedEvidence[]) {
