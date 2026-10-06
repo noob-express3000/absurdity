@@ -54,6 +54,7 @@ type StoryRow = {
 };
 
 type SourceRow = {
+  story_id: string;
   publisher: string;
   url: string;
   published_at: string;
@@ -61,6 +62,7 @@ type SourceRow = {
 };
 
 type StepRow = {
+  story_id: string;
   label: string;
   detail: string;
   status: ResearchStep["status"];
@@ -141,35 +143,56 @@ export class DemoStoryRepository implements StoryRepository {
 }
 
 export class PersistentStoryRepository implements StoryRepository {
-  private async hydrate(row: StoryRow) {
+  private async hydrateMany(rows: StoryRow[]) {
+    if (!rows.length) return [];
+
     const database = await getDatabase();
+    const ids = rows.map((row) => row.id);
+    const placeholders = ids.map(() => "?").join(",");
 
     const [sourceRows, stepRows] = await Promise.all([
       database.query<SourceRow>(
-        "SELECT publisher, url, published_at, source_type FROM story_sources WHERE story_id = ? ORDER BY published_at ASC",
-        [row.id],
+        `SELECT story_id, publisher, url, published_at, source_type
+          FROM story_sources
+          WHERE story_id IN (${placeholders})
+          ORDER BY story_id, published_at ASC`,
+        ids,
       ),
       database.query<StepRow>(
-        "SELECT label, detail, status, at_value FROM research_steps WHERE story_id = ? ORDER BY ordinal ASC",
-        [row.id],
+        `SELECT story_id, label, detail, status, at_value
+          FROM research_steps
+          WHERE story_id IN (${placeholders})
+          ORDER BY story_id, ordinal ASC`,
+        ids,
       ),
     ]);
 
-    const sources: StorySource[] = sourceRows.map((source) => ({
-      publisher: source.publisher,
-      url: source.url,
-      publishedAt: source.published_at,
-      sourceType: source.source_type,
-    }));
+    const sourcesByStory = new Map<string, StorySource[]>();
+    for (const source of sourceRows) {
+      const sources = sourcesByStory.get(source.story_id) ?? [];
+      sources.push({
+        publisher: source.publisher,
+        url: source.url,
+        publishedAt: source.published_at,
+        sourceType: source.source_type,
+      });
+      sourcesByStory.set(source.story_id, sources);
+    }
 
-    const research: ResearchStep[] = stepRows.map((step) => ({
-      label: step.label,
-      detail: step.detail,
-      status: step.status,
-      at: step.at_value,
-    }));
+    const researchByStory = new Map<string, ResearchStep[]>();
+    for (const step of stepRows) {
+      const research = researchByStory.get(step.story_id) ?? [];
+      research.push({
+        label: step.label,
+        detail: step.detail,
+        status: step.status,
+        at: step.at_value,
+      });
+      researchByStory.set(step.story_id, research);
+    }
 
-    return rowToStory(row, sources, research);
+    return rows.map((row) =>
+      rowToStory(row, sourcesByStory.get(row.id) ?? [], researchByStory.get(row.id) ?? []));
   }
 
   async getCurrentBriefing(): Promise<Briefing> {
@@ -181,7 +204,7 @@ export class PersistentStoryRepository implements StoryRepository {
       ["selected", cutoff, now, 100],
     );
 
-    const stories = await Promise.all(rows.map((row) => this.hydrate(row)));
+    const stories = await this.hydrateMany(rows);
     const latestRun = await getLatestResearchRun();
 
     return {
@@ -204,7 +227,7 @@ export class PersistentStoryRepository implements StoryRepository {
   async getStory(id: string) {
     const database = await getDatabase();
     const rows = await database.query<StoryRow>("SELECT * FROM stories WHERE id = ? LIMIT 1", [id]);
-    return rows[0] ? this.hydrate(rows[0]) : null;
+    return rows[0] ? (await this.hydrateMany([rows[0]]))[0] : null;
   }
 
   async searchStories(query: string, limit = 200, dates: ArchiveDates = {}) {
@@ -223,7 +246,7 @@ export class PersistentStoryRepository implements StoryRepository {
       [...args, safeLimit],
     );
 
-    return Promise.all(rows.map((row) => this.hydrate(row)));
+    return this.hydrateMany(rows);
   }
 
   async upsertStory(story: Story) {
