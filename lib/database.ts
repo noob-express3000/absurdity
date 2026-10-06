@@ -126,12 +126,12 @@ class TursoDatabase implements SqlDatabase {
   }
 
   async query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []) {
-    const rows = await this.client.prepare(sql).all(params as any[]);
+    const rows = await (await this.client.prepare(sql)).all(params as any[]);
     return rows as unknown as T[];
   }
 
   async execute(sql: string, params: unknown[] = []) {
-    const result = await this.client.prepare(sql).run(params as any[]);
+    const result = await (await this.client.prepare(sql)).run(params as any[]);
     return Number(result.changes);
   }
 
