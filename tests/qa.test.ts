@@ -134,9 +134,9 @@ test('history archive hydrates any number of stories in three database queries',
   const database = await getDatabase();
   const originalQuery = database.query.bind(database);
   let queries = 0;
-  (database as any).query = async (...args: any[]) => {
+  (database as any).query = async (sql: string, params?: unknown[]) => {
     queries += 1;
-    return originalQuery(...args);
+    return originalQuery(sql, params);
   };
 
   try {
