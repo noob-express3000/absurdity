@@ -609,19 +609,30 @@ export default function Home() {
     <main className="reader-app">
       <header className="app-header">
         <div className="brand">
-          <button className="brand-icon" onClick={() => void fetchStories()} aria-label="Fetch new stories" aria-busy={fetching} title={fetching ? "Fetching stories…" : "Fetch new stories"}>
-            {fetching ? <svg className="loading-ring" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : <span aria-hidden="true">A</span>}
+          <button className="brand-icon" onClick={() => changeTab("home")} aria-label="Home" title="Home">
+            <span aria-hidden="true">A</span>
           </button>
           <button className="brand-home" onClick={() => changeTab("home")} aria-label="New stories" aria-current={tab === "home" ? "page" : undefined}>
             <h1 className="brand-name">Absurdity</h1>
           </button>
         </div>
         <nav className="tabs" aria-label="Story views">
-          {([ ["favorites", "Favorites"], ["history", "History"] ] as const).map(([id, label]) => (
-            <button key={id} onClick={() => changeTab(id)} aria-current={tab === id ? "page" : undefined}>
-              {id === "favorites" ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L3 9.6l6.2-.9L12 3Z"/></svg> : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>}{label}
-            </button>
-          ))}
+          <button onClick={() => changeTab("home")} aria-current={tab === "home" ? "page" : undefined}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-9Z"/></svg>
+            Home
+          </button>
+          <button onClick={() => changeTab("favorites")} aria-current={tab === "favorites" ? "page" : undefined}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L3 9.6l6.2-.9L12 3Z"/></svg>
+            Favorites
+          </button>
+          <button onClick={() => changeTab("history")} aria-current={tab === "history" ? "page" : undefined}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>
+            History
+          </button>
+          <button onClick={() => void fetchStories()} aria-label="Refresh stories" aria-busy={fetching} disabled={fetching} title={fetching ? "Refreshing stories…" : "Refresh stories"}>
+            {fetching ? <svg className="loading-ring" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M19 11a8 8 0 1 0 1 5"/></svg>}
+            <span className="refresh-label">{fetching ? "Refreshing" : "Refresh"}</span>
+          </button>
         </nav>
         <span className="data-mode" title={usingLive ? "Live story archive" : "These stories are demonstration fixtures"}>
           {usingLive ? "" : "Demo"}
