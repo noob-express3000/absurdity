@@ -26,7 +26,7 @@ jobs:
       - name: Boot and smoke test
         shell: bash
         run: |
-          npm start > /tmp/absurdity-next.log 2>&1 &
+          ABSURDITY_MODE=demo npm start > /tmp/absurdity-next.log 2>&1 &
           APP_PID=$!
           trap "kill $APP_PID || true" EXIT
 
