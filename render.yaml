@@ -21,6 +21,10 @@ services:
         sync: false
       - key: ELEVENLABS_VOICE_ID
         sync: false
+      - key: EXA_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN
@@ -29,3 +33,5 @@ services:
         value: "30"
       - key: RESEARCH_MAX_CANDIDATES
         value: "12"
+      - key: EXA_DISCOVERY_RESULTS_PER_QUERY
+        value: "6"

@@ -57,12 +57,12 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - event/publication date separation
 - ElevenLabs narration route with browser speech fallback
 - optional browser speech-recognition commands for hands-free navigation
-- RSS discovery and explicit refresh cycles
+- Exa-first global discovery with RSS secondary/fallback coverage and explicit refresh cycles
 - Turso Cloud production persistence with SQLite local fallback
 - permanent story/source/research-run archive
 - scheduled deep-research pipeline
 - source-aware clustering and deduplication
-- Groq shortlist analysis with Exa/Tavily as optional corroboration providers
+- Groq shortlist analysis with Exa as the primary discovery/corroboration provider and Tavily as corroboration fallback
 - live archive API wired into the reader with passive focus/5-minute refresh
 
 ## Hands-free commands
@@ -102,7 +102,7 @@ Clicking the app icon or explicitly asking the agent to refresh calls `POST /api
 
 A shared database lease prevents duplicate manual cycles and overlap with `npm run research:daily`. Manual starts have a five-minute shared cooldown. Background work uses Next.js `after()` on the Render Node server; a service restart can interrupt it, and a stale run becomes failed/retryable after 30 minutes. This is not a durable queue or continuous real-time news stream. The page fetches its archive on load and after a tracked cycle finishes, then passively refreshes the saved Turso archive every five minutes while visible and whenever the tab regains focus. Passive refresh never launches discovery or spends model calls.
 
-Discovery includes UPI Odd News, Guardian World, BBC World, ABC Australia and NPR World. It retains the full bounded RSS batch until the pipeline applies the date window, removes duplicate events, and caps candidate analysis. Provider failures and editorial rejection can still produce a small selected briefing.
+When EXA_API_KEY is configured, discovery starts with freshness-bounded Exa news searches across rotating editorial lenses for local incidents, animals, public authorities, transport, science/technology, courts, culture and global regional reporting. Results are domain-diversified before clustering. UPI Odd News, Guardian World, BBC World, ABC Australia and NPR World remain secondary/fallback feeds. Exa search ranking never promotes a story by itself: candidates still pass extraction, corroboration, Groq verification/classification, scoring and persistence. Provider failures and editorial rejection can still produce a small selected briefing.
 
 The scheduled pipeline also runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; Groq is used only after deterministic filtering and clustering.
 
@@ -193,7 +193,7 @@ The backend now implements the production data seam discussed for Absurdity:
 - Automatic SQLite/libSQL schema initialization plus `db/migrations/001_init.sql` as the canonical schema.
 - Permanent story/source/research-run records.
 - `/api/stories` for the current 48-hour briefing or searchable selected-story history.
-- A daily pipeline that clusters RSS candidates, optionally calls Exa/Tavily for corroboration, uses Groq only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
+- A daily pipeline that uses Exa as primary discovery when configured, adds RSS secondary/fallback candidates, calls Exa/Tavily for independent corroboration, uses Groq only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
 - Provider usage and failures are recorded per research run.
 
 Run the deep pipeline manually with:

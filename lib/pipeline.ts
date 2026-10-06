@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DiscoveredCandidate } from "./research";
-import { runLightweightDiscovery } from "./research";
+import { runDiscovery, type DiscoveryResult } from "./research";
 import {
   type CandidateAnalysis,
   type CandidateEvidence,
@@ -157,7 +157,7 @@ function makeStoryId(group: CandidateGroup) {
 }
 
 type ResearchOptions = {
-  discover?: typeof runLightweightDiscovery;
+  discover?: (options?: { windowHours?: number }) => Promise<DiscoveryResult>;
   loadArticle?: PageLoader;
   runId?: string;
 };
@@ -174,7 +174,7 @@ export async function runDailyResearch(options: ResearchOptions = {}) {
 }
 
 async function executeResearch(options: {
-  discover?: typeof runLightweightDiscovery;
+  discover?: (options?: { windowHours?: number }) => Promise<DiscoveryResult>;
   loadArticle?: PageLoader;
   runId: string;
 }) {
@@ -186,6 +186,8 @@ async function executeResearch(options: {
   const failures: string[] = [];
   const providerUsage = {
     rss: true,
+    discoveryProvider: "rss",
+    exaDiscoveryQueries: 0,
     searchProvider: "none",
     searchQueries: 0,
     groq: false,
@@ -209,7 +211,9 @@ async function executeResearch(options: {
   });
 
   try {
-    const discovery = await (options.discover ?? runLightweightDiscovery)();
+    const discovery = await (options.discover ?? runDiscovery)({ windowHours });
+    providerUsage.discoveryProvider = discovery.providers?.includes("exa") ? "exa+rss" : "rss";
+    providerUsage.exaDiscoveryQueries = discovery.exaQueries ?? 0;
     failures.push(...discovery.failures.map((publisher) => "RSS: " + publisher));
     if (discovery.scanned === 0 && discovery.failures.length) throw new Error("No news feeds could be fetched.");
 
@@ -236,12 +240,12 @@ async function executeResearch(options: {
 
     for (const group of groups) {
       const primary = group.primary;
-      const rssEvidence: CandidateEvidence[] = [primary, ...group.candidates.filter(candidate => candidate !== primary)].map((candidate) => ({
+      const discoveryEvidence: CandidateEvidence[] = [primary, ...group.candidates.filter(candidate => candidate !== primary)].map((candidate) => ({
         publisher: candidate.publisher,
         title: candidate.title,
         url: normalizeUrl(candidate.url),
         text: candidate.snippet,
-        kind: "rss",
+        kind: candidate.origin === "exa" ? "search" : "rss",
         publishedAt: candidate.publishedAt,
       }));
 
@@ -249,7 +253,13 @@ async function executeResearch(options: {
       if (searchProvider) {
         try {
           providerUsage.searchQueries += 1;
-          const hits = await searchProvider.search(primary.title, 5);
+          const primaryDomain = (() => { try { return new URL(primary.url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
+          const hits = await searchProvider.search(primary.title, 5, {
+            category: "news",
+            moderation: true,
+            excludeDomains: primaryDomain ? [primaryDomain] : undefined,
+            objective: "Find independent reporting or primary-source corroboration of the exact same event. Prefer a different publisher from the discovered article.",
+          });
           searchEvidence = hits.map((hit) => ({
             publisher: publisherFromUrl(hit.url),
             title: hit.title,
@@ -265,9 +275,9 @@ async function executeResearch(options: {
       }
 
       const discoveredEvidence = [
-        ...rssEvidence,
+        ...discoveryEvidence,
         ...searchEvidence.filter(
-          (item) => !rssEvidence.some((source) => normalizeUrl(source.url) === normalizeUrl(item.url)),
+          (item) => !discoveryEvidence.some((source) => normalizeUrl(source.url) === normalizeUrl(item.url)),
         ),
       ];
 
@@ -313,14 +323,14 @@ async function executeResearch(options: {
           failures.push(
             "Groq: " + (error instanceof Error ? error.message : "candidate analysis failed"),
           );
-          analysis = deterministicAnalysis(primary, rssEvidence);
+          analysis = deterministicAnalysis(primary, discoveryEvidence);
         }
       } else {
-        analysis = deterministicAnalysis(primary, rssEvidence);
+        analysis = deterministicAnalysis(primary, discoveryEvidence);
       }
 
       const corroborating = new Set([
-        ...rssEvidence.map((item) => item.url),
+        ...discoveryEvidence.map((item) => item.url),
         ...analysis.corroboratingUrls,
       ]);
 
@@ -330,7 +340,7 @@ async function executeResearch(options: {
           publisher: item.publisher,
           url: item.url,
           publishedAt: item.publishedAt || primary.publishedAt || startedAt.toISOString(),
-          sourceType: rssEvidence.some((source) => source.url === item.url)
+          sourceType: discoveryEvidence.some((source) => source.url === item.url && source.kind === "rss")
             ? sourceTypeForPublisher(item.publisher)
             : "search",
         }));
@@ -378,9 +388,11 @@ async function executeResearch(options: {
             label: "Discovered",
             detail:
               group.candidates.length +
-              " RSS item" +
+              " discovery item" +
               (group.candidates.length === 1 ? "" : "s") +
-              " grouped into this event cluster.",
+              " grouped into this event cluster from " +
+              Array.from(new Set(group.candidates.map(candidate => candidate.origin || "rss"))).join(" + ") +
+              ".",
             status: "complete",
             at: currentClock(),
           },

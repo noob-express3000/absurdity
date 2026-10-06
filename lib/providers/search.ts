@@ -2,16 +2,27 @@ export type SearchHit = {
   title: string;
   url: string;
   text?: string;
+  publishedDate?: string;
+};
+
+export type SearchOptions = {
+  startPublishedDate?: string;
+  endPublishedDate?: string;
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  category?: "news";
+  moderation?: boolean;
+  objective?: string;
 };
 
 export interface SearchProvider {
-  search(query: string, limit?: number): Promise<SearchHit[]>;
+  search(query: string, limit?: number, options?: SearchOptions): Promise<SearchHit[]>;
 }
 
 export class ExaSearchProvider implements SearchProvider {
   constructor(private apiKey = process.env.EXA_API_KEY) {}
 
-  async search(query: string, limit = 5) {
+  async search(query: string, limit = 5, options: SearchOptions = {}) {
     if (!this.apiKey) throw new Error("Exa is not configured.");
     const response = await fetch("https://api.exa.ai/search", {
       signal: AbortSignal.timeout(20000),
@@ -20,7 +31,19 @@ export class ExaSearchProvider implements SearchProvider {
         "Content-Type": "application/json",
         "x-api-key": this.apiKey,
       },
-      body: JSON.stringify({ query, numResults: limit, type: "auto", contents: { text: { maxCharacters: 1800 } } }),
+      body: JSON.stringify({
+        query,
+        numResults: limit,
+        type: "auto",
+        category: options.category,
+        moderation: options.moderation,
+        startPublishedDate: options.startPublishedDate,
+        endPublishedDate: options.endPublishedDate,
+        includeDomains: options.includeDomains,
+        excludeDomains: options.excludeDomains,
+        objective: options.objective,
+        contents: { text: { maxCharacters: 1800 } },
+      }),
     });
     if (!response.ok) throw new Error("Exa request failed with status " + response.status);
     const payload = await response.json();
@@ -28,6 +51,7 @@ export class ExaSearchProvider implements SearchProvider {
       title: item.title || item.url,
       url: item.url,
       text: item.text,
+      publishedDate: item.publishedDate,
     }));
   }
 }
@@ -35,7 +59,7 @@ export class ExaSearchProvider implements SearchProvider {
 export class TavilySearchProvider implements SearchProvider {
   constructor(private apiKey = process.env.TAVILY_API_KEY) {}
 
-  async search(query: string, limit = 5) {
+  async search(query: string, limit = 5, _options: SearchOptions = {}) {
     if (!this.apiKey) throw new Error("Tavily is not configured.");
     const response = await fetch("https://api.tavily.com/search", {
       signal: AbortSignal.timeout(20000),
@@ -55,6 +79,7 @@ export class TavilySearchProvider implements SearchProvider {
       title: item.title || item.url,
       url: item.url,
       text: item.content,
+      publishedDate: item.published_date || item.publishedDate,
     }));
   }
 }
