@@ -200,8 +200,8 @@ Use ONLY the supplied evidence. Do not invent facts, locations, dates, sources, 
 
 Return exactly one JSON object and no markdown with these keys:
 selected (boolean),
-summary (string),
-detailedSummary (string),
+summary (string; one concise sentence),
+detailedSummary (string; an original 180-350 word retelling when the evidence supports it, using 2-5 short paragraphs separated by blank lines; explain what happened, the relevant context, and the supported outcome without copying source prose),
 whyItsWeird (string),
 category (string),
 tags (array of short strings),
@@ -224,7 +224,8 @@ Selection policy:
 - keep serious incidents serious and set humorScore low or zero when humor would be inappropriate;
 - use low confidence when evidence is thin or ambiguous;
 - be conservative about country and eventDate;
-- concise original summaries only; never reproduce article prose.
+- keep summary concise, but make detailedSummary useful enough to read or narrate without opening the source when evidence is sufficient;
+- detailedSummary must synthesize across evidence in original language, preserve uncertainty, and never reproduce article prose or fabricate connective detail.
 
 CANDIDATE:
 ${JSON.stringify({
@@ -237,7 +238,7 @@ ${JSON.stringify({
 
 EVIDENCE:
 ${JSON.stringify(evidence)}`,
-      900,
+      1400,
     );
 
     const parsed = extractJson(raw);

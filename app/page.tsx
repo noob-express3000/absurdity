@@ -632,7 +632,13 @@ export default function Home() {
                 <div className="story-heading">
                   <h2>{selected.title}</h2>
                 </div>
-                <p className="story-text">{selected.detailedSummary}</p>
+                {selected.detailedSummary
+                  .split(/\n{2,}/)
+                  .map((paragraph) => paragraph.trim())
+                  .filter(Boolean)
+                  .map((paragraph, index) => (
+                    <p className="story-text" key={`${selected.id}-paragraph-${index}`}>{paragraph}</p>
+                  ))}
                 <div className="source-section" aria-label="Story sources">
                   <span>Sources</span>
                   <div className="source-links">
