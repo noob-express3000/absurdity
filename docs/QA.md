@@ -56,9 +56,9 @@ Full article ingestion checks cover paragraph/tail retention, publisher characte
 
 ## App-icon fetch cycle
 
-The icon now explicitly starts the full discovery/extraction/analysis/persistence pipeline. Unit checks cover concurrent manual claims, overlap prevention with the daily job, completion and shared cooldown, failed-feed discovery, stale-run recovery, lease ownership, cross-site rejection and joining an active cycle. Browser checks with deterministic API responses verify double-click suppression, the loading indicator, refreshed story content, terminal failure, start failure, resuming after reload without another POST, and the single-page layout. Existing voice/navigation regressions still pass; only the explicit icon click starts research. Production build and all 39 automated tests pass.
+The icon now explicitly starts the full discovery/extraction/analysis/persistence pipeline. Unit checks cover concurrent manual claims, overlap prevention with the daily job, completion and shared cooldown, failed-feed discovery, stale-run recovery, lease ownership, cross-site rejection and joining an active cycle. Browser checks with deterministic API responses verify double-click suppression, the loading indicator, refreshed story content, terminal failure, start failure, resuming after reload without another POST, and the single-page layout. Existing voice/navigation regressions still pass; only the explicit app-icon click starts research. The wordmark returns to New stories without starting discovery. Production build and all 51 automated tests pass.
 
-The latest scheduled research run observed on 2026-10-05 was skipped (GitHub run 37296353210); the schedule is conditional on `ENABLE_DAILY_RESEARCH=true`. This change does not enable it. The current page is not a real-time feed. A fetch cycle runs in the web process and can be interrupted by a deployment/restart; expired runs are recoverable after 30 minutes. Live publisher/provider calls are separate from the mocked browser verification.
+The latest scheduled research run observed on 2026-10-05 was skipped (GitHub run 37296353210); the schedule is conditional on `ENABLE_DAILY_RESEARCH=true`. This change does not enable it. The page does not continuously run discovery. It passively checks the already-saved Turso archive every five minutes while visible and on focus, while explicit fetch cycles still run in the web process and can be interrupted by a deployment/restart; expired runs are recoverable after 30 minutes. Live publisher/provider calls are separate from the mocked browser verification.
 
 ## Refresh-command and narration regressions (2026-10-06)
 
@@ -72,7 +72,7 @@ ElevenLabs now returns actionable, sanitised errors for a missing voice ID, key/
 
 ## Live refresh and narration check (2026-10-06)
 
-After deployment of `aeec039`, the typed instruction “Refresh the stories” ran the real research pipeline, reviewed 12 candidates and selected three UPI stories. The reader showed the kangaroo, raccoon and bear articles with publisher links. The live narration request reached ElevenLabs and was rejected with HTTP 402. ElevenLabs documents this as payment required or insufficient credits; this observation does not establish which account/voice restriction applies. Device speech remains the fallback, and ElevenLabs audio is not claimed as working.
+After deployment of `aeec039`, the typed instruction “Refresh the stories” ran the real research pipeline, reviewed 12 candidates and selected three UPI stories. The reader showed the kangaroo, raccoon and bear articles with publisher links. The live narration request in this historical check reached ElevenLabs and was rejected with HTTP 402. The deployment configuration was subsequently corrected. Device speech remains the fallback, and audible ElevenLabs playback is still treated as a runtime check rather than something CI can prove.
 
 Error handling accepts the current `detail.code` field and legacy `detail.status`, with an actionable HTTP 402 fallback. No raw provider message or credential is exposed.
 

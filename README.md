@@ -63,7 +63,7 @@ The seeded Demo Mode anchors its 48-hour window to the newest fixture date so th
 - scheduled deep-research pipeline
 - source-aware clustering and deduplication
 - Groq shortlist analysis with Exa/Tavily as optional corroboration providers
-- live archive API wired into the reader
+- live archive API wired into the reader with passive focus/5-minute refresh
 
 ## Hands-free commands
 
@@ -100,7 +100,7 @@ The live system now has a real persisted pipeline:
 
 Clicking the app icon or explicitly asking the agent to refresh calls `POST /api/research` to start the full pipeline from `lib/pipeline.ts`. The response returns immediately; the icon spins while the reader polls `GET /api/research?id=…` and reloads the archive on completion. Reloading the page resumes an active cycle without launching another. The current reader remains usable during fetching. A transient empty archive response cannot discard an already loaded archive. Ordinary navigation and voice archive searches never initiate discovery. Completion reports how many candidates were reviewed and stories selected.
 
-A shared database lease prevents duplicate manual cycles and overlap with `npm run research:daily`. Manual starts have a five-minute shared cooldown. Background work uses Next.js `after()` on the Render Node server; a service restart can interrupt it, and a stale run becomes failed/retryable after 30 minutes. This is not a durable queue or continuous real-time news stream. The page fetches its archive on load and after a tracked cycle finishes; it does not continuously watch for externally saved stories.
+A shared database lease prevents duplicate manual cycles and overlap with `npm run research:daily`. Manual starts have a five-minute shared cooldown. Background work uses Next.js `after()` on the Render Node server; a service restart can interrupt it, and a stale run becomes failed/retryable after 30 minutes. This is not a durable queue or continuous real-time news stream. The page fetches its archive on load and after a tracked cycle finishes, then passively refreshes the saved Turso archive every five minutes while visible and whenever the tab regains focus. Passive refresh never launches discovery or spends model calls.
 
 Discovery includes UPI Odd News, Guardian World, BBC World, ABC Australia and NPR World. It retains the full bounded RSS batch until the pipeline applies the date window, removes duplicate events, and caps candidate analysis. Provider failures and editorial rejection can still produce a small selected briefing.
 
@@ -169,7 +169,7 @@ Blocked, restricted, non-HTML and unreadable pages retain the available RSS/sear
 - plan: free by default
 - region: Frankfurt
 - build: `npm ci && npm run build`
-- start: `npm start`
+- start: `npm run db:check && npm start`
 - health check: `/api/health`
 - deployed mode: `ABSURDITY_MODE=live` (local default: demo)
 
