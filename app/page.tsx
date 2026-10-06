@@ -610,7 +610,7 @@ export default function Home() {
       <header className="app-header">
         <div className="brand">
           <button className="brand-icon" onClick={() => changeTab("home")} aria-label="Home" title="Home">
-            <span aria-hidden="true">A</span>
+            <span aria-hidden="true">?</span>
           </button>
           <button className="brand-home" onClick={() => changeTab("home")} aria-label="New stories" aria-current={tab === "home" ? "page" : undefined}>
             <h1 className="brand-name">Absurdity</h1>
