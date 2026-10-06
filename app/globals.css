@@ -116,22 +116,24 @@ button {
 .brand-icon {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   padding: 0;
-  border: 1px solid rgba(255,255,255,.72);
+  border: 1px solid #232323;
   border-radius: 11px;
-  color: white;
-  background: linear-gradient(145deg, #796be3 0%, #5d4dce 100%);
-  box-shadow: 0 6px 16px rgba(84, 68, 192, .18);
-  font-size: 18px;
-  font-weight: 760;
+  color: #ff2b2b;
+  background: #050505;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .18);
+  font-size: 24px;
+  font-weight: 850;
   line-height: 1;
 }
 
 .brand-icon:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(84, 68, 192, .22);
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, .24),
+    0 0 0 1px rgba(255, 43, 43, .18);
 }
 
 .brand-home:hover .brand-name { color: #373642; }
