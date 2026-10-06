@@ -5,6 +5,7 @@ import { GET as storiesGet } from '../app/api/stories/route';
 import { POST as chatPost } from '../app/api/chat/route';
 import { POST as narratePost } from '../app/api/narrate/route';
 import { GET as healthGet } from '../app/api/health/route';
+import { GET as liveGet } from '../app/api/live/route';
 import { demoBriefing } from '../lib/demo-data';
 import { PersistentStoryRepository, recordResearchRun, getLatestResearchRun, storyRepository } from '../lib/repository';
 import { GroqIntelligenceProvider } from '../lib/providers/intelligence';
@@ -72,6 +73,13 @@ test('narration validates inputs and returns browser fallback without credential
   assert.equal(response.status, 503);
   assert.equal((await response.json()).fallback, 'browser-speech');
 });
+test('Render liveness is provider-independent and never waits on Turso', async () => {
+  const response = await liveGet();
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, 'ok');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
+
 test('healthy local database reports ready without caching', async () => {
   const response = await healthGet();
   assert.equal(response.status, 200);
