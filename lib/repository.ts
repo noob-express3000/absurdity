@@ -382,9 +382,9 @@ export async function getLatestResearchRun() {
 }
 
 export const storyRepository: StoryRepository =
-  process.env.ABSURDITY_MODE === "live"
-    ? new PersistentStoryRepository()
-    : new DemoStoryRepository();
+  process.env.ABSURDITY_MODE === "demo"
+    ? new DemoStoryRepository()
+    : new PersistentStoryRepository();
 
 // Full source bodies stay out of the public reader payloads.
 export async function saveStoryEvidence(storyId: string, evidence: IngestedEvidence[]) {
