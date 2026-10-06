@@ -208,7 +208,8 @@ export async function runDiscovery(options: {
   const startPublishedDate = new Date(now.getTime() - windowHours * 60 * 60 * 1000).toISOString();
   const endPublishedDate = now.toISOString();
   const resultsPerQuery = Math.max(3, Math.min(10, options.resultsPerQuery ?? Number(process.env.EXA_DISCOVERY_RESULTS_PER_QUERY || 6)));
-  const exa = options.searchWeb ?? new ExaSearchProvider().search.bind(new ExaSearchProvider());
+  const exaProvider = options.searchWeb ? null : new ExaSearchProvider();
+  const exa = options.searchWeb ?? exaProvider!.search.bind(exaProvider);
   const exaCandidates: DiscoveredCandidate[] = [];
   const exaFailures: string[] = [];
   let exaQueries = 0;

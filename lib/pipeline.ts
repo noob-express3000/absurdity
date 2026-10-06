@@ -113,10 +113,10 @@ function basicCategory(title: string) {
 
 function deterministicAnalysis(
   primary: DiscoveredCandidate,
-  rssEvidence: CandidateEvidence[],
+  discoveryEvidence: CandidateEvidence[],
 ): CandidateAnalysis {
   const summary = primary.snippet?.trim() || primary.title;
-  const multiSource = new Set(rssEvidence.map((item) => item.publisher)).size > 1;
+  const multiSource = new Set(discoveryEvidence.map((item) => item.publisher)).size > 1;
 
   return {
     selected: multiSource && primary.localScore >= 12,
@@ -137,9 +137,9 @@ function deterministicAnalysis(
     confidence: multiSource ? "medium" : "low",
     seriousness: "mixed",
     verificationNotes: multiSource
-      ? "Multiple RSS publishers appear to report the same clustered event. Groq analysis was unavailable, so selection remains conservative."
-      : "Single-source RSS discovery only. Groq analysis was unavailable, so this candidate is retained for history but not promoted.",
-    corroboratingUrls: rssEvidence.map((item) => item.url),
+      ? "Multiple discovery sources appear to report the same clustered event. Groq analysis was unavailable, so selection remains conservative."
+      : "Single-source discovery only. Groq analysis was unavailable, so this candidate is retained for history but not promoted.",
+    corroboratingUrls: discoveryEvidence.map((item) => item.url),
   };
 }
 
@@ -214,7 +214,8 @@ async function executeResearch(options: {
     const discovery = await (options.discover ?? runDiscovery)({ windowHours });
     providerUsage.discoveryProvider = discovery.providers?.includes("exa") ? "exa+rss" : "rss";
     providerUsage.exaDiscoveryQueries = discovery.exaQueries ?? 0;
-    failures.push(...discovery.failures.map((publisher) => "RSS: " + publisher));
+    failures.push(...discovery.failures.map((failure) =>
+      failure.startsWith("Exa discovery:") ? failure : "RSS: " + failure));
     if (discovery.scanned === 0 && discovery.failures.length) throw new Error("No news feeds could be fetched.");
 
     const inWindow = discovery.candidates.filter((candidate) => {
@@ -266,6 +267,7 @@ async function executeResearch(options: {
             url: normalizeUrl(hit.url),
             text: hit.text,
             kind: "search",
+            publishedAt: hit.publishedDate,
           }));
         } catch (error) {
           failures.push(
@@ -400,7 +402,7 @@ async function executeResearch(options: {
             label: "Corroboration search",
             detail: searchProvider
               ? searchEvidence.length + " optional search result(s) inspected."
-              : "No paid search provider configured; RSS evidence only.",
+              : "No search provider configured; discovery evidence only.",
             status: searchProvider ? "complete" : "warning",
             at: currentClock(),
           },
