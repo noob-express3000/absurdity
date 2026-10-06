@@ -53,3 +53,29 @@ test('provider failures expose actionable codes without echoing provider secrets
     assert.equal((await (await POST(request())).json()).code,'invalid_audio');
   } finally {globalThis.fetch=original;delete process.env.ELEVENLABS_API_KEY;delete process.env.ELEVENLABS_VOICE_ID;}
 });
+
+test('current ElevenLabs error codes and payment-required responses stay actionable and private', async () => {
+  const original = globalThis.fetch;
+  try {
+    process.env.ELEVENLABS_API_KEY = 'test-secret';
+    process.env.ELEVENLABS_VOICE_ID = 'selected-voice';
+    for (const detail of [
+      { code: 'insufficient_credits', status: 'unknown-legacy', message: 'test-secret' },
+      { status: 'payment_required', message: 'test-secret' },
+      { type: 'payment_required', message: 'test-secret' },
+    ]) {
+      globalThis.fetch = async () => Response.json({ detail }, { status: 402 });
+      const response = await POST(request());
+      const body = await response.json();
+      assert.equal(response.status, 502);
+      assert.equal(body.code, detail.code || 'payment_required');
+      assert.match(body.error, /credits/);
+      assert.match(body.error, /HTTP 402/);
+      assert.doesNotMatch(JSON.stringify(body), /test-secret|unknown-legacy/);
+    }
+  } finally {
+    globalThis.fetch = original;
+    delete process.env.ELEVENLABS_API_KEY;
+    delete process.env.ELEVENLABS_VOICE_ID;
+  }
+});

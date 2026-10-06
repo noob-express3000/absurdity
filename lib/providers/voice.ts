@@ -12,6 +12,7 @@ export class NarrationError extends Error {
 const providerErrors: Record<string, string> = {
   invalid_api_key: "ElevenLabs rejected the API key.",
   missing_permissions: "The ElevenLabs key needs Text to Speech permission.",
+  insufficient_permissions: "The ElevenLabs key needs Text to Speech permission.",
   voice_not_found: "ElevenLabs could not find the configured voice ID.",
   quota_exceeded: "ElevenLabs narration credits are exhausted.",
   insufficient_credits: "ElevenLabs narration credits are exhausted.",
@@ -19,6 +20,12 @@ const providerErrors: Record<string, string> = {
   too_many_concurrent_requests: "ElevenLabs is handling too many narration requests. Try again shortly.",
   system_busy: "ElevenLabs is busy. Try again shortly.",
   paid_plan_required: "The configured ElevenLabs voice or feature requires a paid plan.",
+  subscription_required: "The configured ElevenLabs voice or feature requires a paid plan.",
+  payment_required: "ElevenLabs requires payment or more credits. Check your plan, voice access and credit balance.",
+  voice_access_denied: "Your ElevenLabs account does not have access to the configured voice.",
+  model_access_denied: "Your ElevenLabs account does not have access to the narration model.",
+  rate_limit_exceeded: "ElevenLabs is receiving too many requests. Try again shortly.",
+  concurrent_limit_exceeded: "ElevenLabs is handling too many narration requests. Try again shortly.",
   detected_unusual_activity: "ElevenLabs blocked this request under its account usage checks.",
 };
 
@@ -62,8 +69,12 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
 
     if (!response.ok) {
       const body = await response.json().catch(() => null);
-      const status = typeof body?.detail?.status === "string" ? body.detail.status : "";
-      const code = Object.hasOwn(providerErrors, status) ? status : "provider_error";
+      // Current responses use detail.code; status is retained for legacy errors.
+      const detail = body?.detail;
+      const status = typeof detail?.code === "string" ? detail.code
+        : typeof detail?.status === "string" ? detail.status : "";
+      const code = Object.hasOwn(providerErrors, status) ? status
+        : response.status === 402 ? "payment_required" : "provider_error";
       const message = providerErrors[code] || (response.status === 401
         ? "ElevenLabs rejected the API key or its permissions."
         : response.status === 403 ? "ElevenLabs denied access to this voice or feature."
