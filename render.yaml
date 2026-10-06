@@ -6,7 +6,7 @@ services:
     region: frankfurt
     buildCommand: npm ci && npm run build
     startCommand: npm run db:check && npm start
-    healthCheckPath: /api/live
+    healthCheckPath: /
     autoDeployTrigger: checksPass
     envVars:
       - key: ABSURDITY_MODE
