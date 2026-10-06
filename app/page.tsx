@@ -74,6 +74,7 @@ export default function Home() {
   const fetchBusyRef = useRef(false);
   const fetchReplyRef = useRef(false);
   const archiveRequestRef = useRef(0);
+  const archiveLoadedRef = useRef(false);
   const fetchControllerRef = useRef<AbortController | null>(null);
   const anchorTime = useMemo(() => (usingLive ? Date.now() : demoClock()), [usingLive, remoteStories]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -95,7 +96,7 @@ export default function Home() {
     setHydrated(true);
   }, []);
 
-  const reloadArchive = useCallback(async (signal?: AbortSignal) => {
+  const reloadArchive = useCallback(async (signal?: AbortSignal, surfaceErrors = true) => {
     const requestId = ++archiveRequestRef.current;
     try {
       const response = await fetch("/api/stories?scope=history&limit=500", {
@@ -107,6 +108,7 @@ export default function Home() {
       if (!["live", "demo"].includes(payload?.mode) || !Array.isArray(payload?.stories)) {
         throw new Error("Invalid archive response.");
       }
+      archiveLoadedRef.current = true;
       setArchiveError("");
       const mode = payload.mode;
       if (mode === "live") {
@@ -128,7 +130,12 @@ export default function Home() {
       }
     } catch (error) {
       if (signal?.aborted || requestId !== archiveRequestRef.current) return;
-      setArchiveError("Couldn't load the story archive. Try again.");
+      // Passive refreshes are stale-while-revalidate: once a valid archive has
+      // loaded, a transient Render/Turso/network failure must not interrupt reading
+      // or throw a large error banner over cached stories.
+      if (surfaceErrors || !archiveLoadedRef.current) {
+        setArchiveError("Couldn't load the story archive. Try again.");
+      }
       throw error;
     }
   }, []);
@@ -152,7 +159,7 @@ export default function Home() {
   useEffect(() => {
     function refreshVisibleArchive() {
       if (document.visibilityState === "visible" && !fetchBusyRef.current) {
-        void reloadArchive().catch(() => {});
+        void reloadArchive(undefined, false).catch(() => {});
       }
     }
 
