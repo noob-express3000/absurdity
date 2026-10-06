@@ -38,9 +38,9 @@ function demoClock() {
 
 export default function Home() {
   const [remoteStories, setRemoteStories] = useState<Story[] | null>(null);
-  const [dataMode, setDataMode] = useState<"demo" | "live">("demo");
-  const stories = remoteStories ?? demoBriefing.stories;
-  const usingLive = dataMode === "live";
+  const [dataMode, setDataMode] = useState<"loading" | "demo" | "live">("loading");
+  const stories = dataMode === "demo" ? demoBriefing.stories : remoteStories ?? [];
+  const usingLive = dataMode !== "demo";
   const [tab, setTab] = useState<Tab>("home");
   const [selectedId, setSelectedId] = useState(demoBriefing.stories[0].id);
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -96,10 +96,15 @@ export default function Home() {
         setSelectedId(current =>
           payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
       } else {
-        // An initially empty production archive is genuinely empty. Once live
-        // stories have loaded, a transient empty refresh must not erase them.
-        setRemoteStories(current => current === null ? [] : current);
+        // An empty persistent archive is genuinely empty. Never replace it with
+        // seeded fixtures in live mode.
+        setRemoteStories([]);
       }
+    } else if (mode === "demo") {
+      setDataMode("demo");
+      setRemoteStories(null);
+      setSelectedId(current =>
+        demoBriefing.stories.some(story => story.id === current) ? current : demoBriefing.stories[0].id);
     }
   }, []);
 
@@ -274,7 +279,7 @@ export default function Home() {
     ? tab === "favorites" ? searchResults.filter((story) => favorites.includes(story.id)) : searchResults
     : baseStories;
 
-  const selected = visibleStories.find((story) => story.id === selectedId) ?? visibleStories[0] ?? stories[0];
+  const selected = visibleStories.find((story) => story.id === selectedId) ?? visibleStories[0] ?? stories[0] ?? demoBriefing.stories[0];
 
   useEffect(() => {
     if (visibleStories.length && !visibleStories.some((story) => story.id === selectedId)) {
