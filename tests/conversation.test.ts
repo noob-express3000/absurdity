@@ -71,15 +71,21 @@ test('malformed Groq plans fall back safely and live mode never substitutes fixt
   }
 });
 
-test('voice route limits oversized requests and deterministic search works without Groq', async () => {
+test('voice route limits oversized requests and deterministic search works only in server demo mode', async () => {
   const request = (body:unknown) => new Request('http://localhost/api/chat',{method:'POST',body:JSON.stringify(body)});
   assert.equal((await POST(request({message:'a'.repeat(2001),voice:true}))).status,400);
-  const response = await POST(request({...context,message:'find animal stories in my favorites',voice:true}));
-  assert.equal(response.status,200);
-  const body = await response.json();
-  assert.equal(body.action.action,'search');
-  assert.equal(body.action.view,'favorites');
-  assert.equal(body.provider,'deterministic');
+  const oldMode = process.env.ABSURDITY_MODE;
+  try {
+    process.env.ABSURDITY_MODE = 'demo';
+    const response = await POST(request({...context,message:'find animal stories in my favorites',voice:true}));
+    assert.equal(response.status,200);
+    const body = await response.json();
+    assert.equal(body.action.action,'search');
+    assert.equal(body.action.view,'favorites');
+    assert.equal(body.provider,'deterministic');
+  } finally {
+    if (oldMode === undefined) delete process.env.ABSURDITY_MODE; else process.env.ABSURDITY_MODE = oldMode;
+  }
 });
 
 test('explicit refresh returns a real refresh action without asking Groq or searching the archive', async () => {
