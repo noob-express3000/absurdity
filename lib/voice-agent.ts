@@ -5,6 +5,7 @@ import { parseNavigation, type StoryView } from './navigation';
 import { GroqIntelligenceProvider } from './providers/intelligence';
 import { DemoStoryRepository, storyRepository } from './repository';
 import type { Story } from './types';
+import { clampHistoryBefore, clampHomeFrom } from './story-lifecycle';
 
 export type VoiceContext = {
   message: string;
@@ -79,7 +80,14 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   }
 
   if (plan.action === 'search') {
-    const matches = await repository.searchStories(plan.query ?? '', 500, { from: plan.from ?? undefined, before: plan.before ?? undefined });
+    const targetView = plan.view ?? context.scope;
+    const dates = {
+      from: plan.from ?? undefined,
+      before: plan.before ?? undefined,
+    };
+    if (targetView === 'history') dates.before = clampHistoryBefore(dates.before, clock);
+    if (targetView === 'home') dates.from = clampHomeFrom(dates.from, clock);
+    const matches = await repository.searchStories(plan.query ?? '', 500, dates);
     // Favorites are private browser state; the client applies that final filter.
     const text = plan.view === 'favorites'
       ? 'I found matching saved stories. I will show the ones you have favorited.'
