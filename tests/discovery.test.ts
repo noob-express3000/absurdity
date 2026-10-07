@@ -71,6 +71,27 @@ test('Exa discovery is primary, freshness bounded, diverse, and RSS remains seco
   assert.ok(discovery.candidates.filter(candidate=>candidate.publisher==='local.example').length<=3);
 });
 
+test('discovery rejects non-web URL schemes before they can become source links', async () => {
+  const now = new Date('2026-10-06T18:00:00.000Z');
+  const rss = await runLightweightDiscovery({parseFeed:async url => ({items:url.includes('upi') ? [
+    {title:'Unsafe RSS link',link:'javascript:alert(1)',isoDate:now.toISOString()},
+    {title:'Safe RSS link',link:'https://rss.example/safe',isoDate:now.toISOString()},
+  ] : []})});
+  assert.deepEqual(rss.candidates.map(candidate=>candidate.url),['https://rss.example/safe']);
+
+  const discovery = await runDiscovery({
+    now,
+    searchWeb: async () => [
+      {title:'Unsafe search link',url:'data:text/html,bad',publishedDate:now.toISOString()},
+      {title:'Safe search link',url:'https://search.example/safe',publishedDate:now.toISOString()},
+    ],
+    parseFeed: async () => ({items:[]}),
+  });
+  assert.ok(discovery.candidates.length > 0);
+  assert.ok(discovery.candidates.every(candidate=>/^https?:\/\//.test(candidate.url)));
+  assert.ok(discovery.candidates.some(candidate=>candidate.url==='https://search.example/safe'));
+});
+
 test('Exa provider sends news freshness and domain filters and retains publication dates', async () => {
   const original = globalThis.fetch;
   try {
