@@ -26,7 +26,7 @@ test('requested search combines geography, category, and publication-date bounds
   if (older.action !== 'search') return;
   const results = await new DemoStoryRepository().searchStories(older.query,500,older);
   assert.ok(results.length);
-  assert.ok(results.every(story=>Date.parse(story.publicationDate)<olderClock-2*86400000));
+  assert.ok(results.every(story=>Date.parse(story.publicationDate)<olderClock-7*86400000));
 });
 test('exact dates use Johannesburg publication days and invalid dates are rejected', () => {
   assert.deepEqual(parseNavigation('find animal stories on 2026-10-01','history',clock),{
