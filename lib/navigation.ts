@@ -1,3 +1,5 @@
+import { HOME_WINDOW_MS } from "./story-lifecycle";
+
 export type StoryView = "home" | "favorites" | "history";
 export type NavigationRequest =
   | { action: "next" | "previous" | "favorite" | "dismiss" | "read" | "stop" | "stop-listening" | "refresh" }
@@ -46,7 +48,7 @@ export function parseNavigation(raw: string, currentView: StoryView, now: number
     query = query.replace(period[0], " ");
   }
   if (/\bolder\b/.test(query)) {
-    before = new Date(now - 2 * 86400000).toISOString();
+    before = new Date(now - HOME_WINDOW_MS).toISOString();
     query = query.replace(/\bolder\b/g, " ");
   }
   query = query.replace(/\bsouth african\b/g, "south africa")
