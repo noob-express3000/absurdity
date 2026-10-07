@@ -42,7 +42,30 @@ test('archive rejects noninteger, negative, and oversized limits', async () => {
 });
 test('malformed chat requests are client errors', async () => {
   for (const body of [null, {}, {message: '  '}, {message: 7}]) assert.equal((await chatPost(request(body))).status, 400);
+  assert.equal((await chatPost(request({message:'hello',storyId:'x'.repeat(151)}))).status,400);
   assert.equal((await chatPost(new Request('http://localhost/api', {method:'POST', body:'{'}))).status, 400);
+});
+
+test('production voice mode cannot be forced into demo fixtures by the client', async () => {
+  const oldMode = process.env.ABSURDITY_MODE;
+  const oldBriefing = storyRepository.getCurrentBriefing;
+  const oldStory = storyRepository.getStory;
+  try {
+    process.env.ABSURDITY_MODE = 'live';
+    storyRepository.getCurrentBriefing = async () => ({...demoBriefing,mode:'live',stories:[]});
+    storyRepository.getStory = async () => null;
+    const response = await chatPost(request({
+      message:'tell me more', voice:true, displayMode:'demo', scope:'home', visibleIds:[], history:[],
+    }));
+    assert.equal(response.status,200);
+    const body = await response.json();
+    assert.equal(body.mode,'live');
+    assert.doesNotMatch(body.text,/emu|goat|fixture/i);
+  } finally {
+    storyRepository.getCurrentBriefing = oldBriefing;
+    storyRepository.getStory = oldStory;
+    if (oldMode === undefined) delete process.env.ABSURDITY_MODE; else process.env.ABSURDITY_MODE = oldMode;
+  }
 });
 test('demo conversation is grounded and explicitly identifies fixtures', async () => {
   const africa = await (await chatPost(request({message:'Anything from Africa?'}))).json();
