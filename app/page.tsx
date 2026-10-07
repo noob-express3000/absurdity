@@ -8,13 +8,13 @@ import { parseNavigation } from "@/lib/navigation";
 import type { ConversationTurn } from "@/lib/conversation";
 import type { ResearchCycle } from "@/lib/research-cycle";
 import type { VoiceReply } from "@/lib/voice-agent";
+import { isHistoryPublicationDate, isHomePublicationDate } from "@/lib/story-lifecycle";
 
 type Tab = "home" | "favorites" | "history";
 type VoiceState = "idle" | "loading" | "playing";
 
 const FAVORITES_KEY = "absurdity:favorites:v1";
 const DISMISSED_KEY = "absurdity:dismissed:v1";
-const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 const ARCHIVE_REFRESH_MS = 5 * 60 * 1000;
 
 function cycleSummary(run: ResearchCycle) {
@@ -99,7 +99,7 @@ export default function Home() {
   const reloadArchive = useCallback(async (signal?: AbortSignal, surfaceErrors = true) => {
     const requestId = ++archiveRequestRef.current;
     try {
-      const response = await fetch("/api/stories?scope=history&limit=500", {
+      const response = await fetch("/api/stories?scope=all&limit=500", {
         cache: "no-store", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
       });
       if (!response.ok) throw new Error("Could not refresh stories.");
@@ -291,14 +291,15 @@ export default function Home() {
   }, []);
 
   const homeStories = useMemo(
-    () =>
-      stories.filter(
-        (story) =>
-          anchorTime - new Date(story.publicationDate).getTime() <= TWO_DAYS_MS &&
-          new Date(story.publicationDate).getTime() <= anchorTime &&
-          !dismissed.includes(story.id),
-      ),
+    () => stories.filter(
+      (story) => isHomePublicationDate(story.publicationDate, anchorTime) && !dismissed.includes(story.id),
+    ),
     [anchorTime, dismissed, stories],
+  );
+
+  const historyStories = useMemo(
+    () => stories.filter((story) => isHistoryPublicationDate(story.publicationDate, anchorTime)),
+    [anchorTime, stories],
   );
 
   const favoriteStories = useMemo(
@@ -306,9 +307,13 @@ export default function Home() {
     [favorites, stories],
   );
 
-  const baseStories = tab === "home" ? homeStories : tab === "favorites" ? favoriteStories : stories;
+  const baseStories = tab === "home" ? homeStories : tab === "favorites" ? favoriteStories : historyStories;
   const visibleStories = searchResults
-    ? tab === "favorites" ? searchResults.filter((story) => favorites.includes(story.id)) : searchResults
+    ? tab === "favorites"
+      ? searchResults.filter((story) => favorites.includes(story.id))
+      : tab === "home"
+        ? searchResults.filter((story) => isHomePublicationDate(story.publicationDate, anchorTime) && !dismissed.includes(story.id))
+        : searchResults.filter((story) => isHistoryPublicationDate(story.publicationDate, anchorTime))
     : baseStories;
 
   const selected = visibleStories.find((story) => story.id === selectedId) ?? visibleStories[0] ?? stories[0] ?? demoBriefing.stories[0];
