@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase, type SqlStatement } from "./database";
 import { demoBriefing } from "./demo-data";
 import type { Briefing, ResearchStep, Story, StorySource, IngestedEvidence } from "./types";
+import { HOME_WINDOW_DAYS, homeCutoffIso, isHomePublicationDate } from "./story-lifecycle";
 
 export interface StoryRepository {
   getCurrentBriefing(): Promise<Briefing>;
@@ -112,7 +113,18 @@ function rowToStory(row: StoryRow, sources: StorySource[], research: ResearchSte
 
 export class DemoStoryRepository implements StoryRepository {
   async getCurrentBriefing() {
-    return demoBriefing;
+    const anchor = Math.max(...demoBriefing.stories.map((story) => Date.parse(story.publicationDate)));
+    const stories = demoBriefing.stories.filter((story) => isHomePublicationDate(story.publicationDate, anchor));
+    return {
+      ...demoBriefing,
+      window: `Most recent ${HOME_WINDOW_DAYS} days (seeded fixtures)`,
+      stats: {
+        ...demoBriefing.stats,
+        selected: stories.length,
+        countries: new Set(stories.map((story) => story.country)).size,
+      },
+      stories,
+    };
   }
 
   async getStory(id: string) {
@@ -197,7 +209,7 @@ export class PersistentStoryRepository implements StoryRepository {
 
   async getCurrentBriefing(): Promise<Briefing> {
     const database = await getDatabase();
-    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const cutoff = homeCutoffIso();
     const now = new Date().toISOString();
     const rows = await database.query<StoryRow>(
       "SELECT * FROM stories WHERE status = ? AND publication_date >= ? AND publication_date <= ? ORDER BY rank ASC, absurdity_score DESC, publication_date DESC LIMIT ?",
@@ -212,7 +224,7 @@ export class PersistentStoryRepository implements StoryRepository {
       label: "Live Absurdity briefing",
       mode: "live",
       generatedAt: latestRun?.completed_at || new Date().toISOString(),
-      window: "Most recent 48 hours",
+      window: `Most recent ${HOME_WINDOW_DAYS} days`,
       stats: {
         scanned: Number(latestRun?.scanned || 0),
         unusual: Number(latestRun?.candidates || 0),
