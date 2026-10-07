@@ -26,9 +26,9 @@ export const demoBriefing: Briefing = {
       tags: ["animal", "police", "traffic", "harmless"],
       country: "Australia",
       region: "Oceania",
-      eventDate: "2026-10-01T07:20:00Z",
-      publicationDate: "2026-10-01T10:10:00Z",
-      discoveredAt: "2026-10-01T10:18:00Z",
+      eventDate: "2026-09-24T07:20:00Z",
+      publicationDate: "2026-09-24T10:10:00Z",
+      discoveredAt: "2026-09-24T10:18:00Z",
       absurdityScore: 96,
       noveltyScore: 90,
       humorScore: 91,
@@ -38,9 +38,9 @@ export const demoBriefing: Briefing = {
       seriousness: "harmless",
       clusterId: "cluster-emu-01",
       sources: [
-        { publisher: "Demo Local News", url: "https://example.org/demo/emu-local", publishedAt: "2026-10-01T10:10:00Z", sourceType: "demo-fixture" },
-        { publisher: "Demo Police Bulletin", url: "https://example.org/demo/emu-police", publishedAt: "2026-10-01T11:00:00Z", sourceType: "demo-fixture" },
-        { publisher: "Demo National Desk", url: "https://example.org/demo/emu-national", publishedAt: "2026-10-01T12:12:00Z", sourceType: "demo-fixture" }
+        { publisher: "Demo Local News", url: "https://example.org/demo/emu-local", publishedAt: "2026-09-24T10:10:00Z", sourceType: "demo-fixture" },
+        { publisher: "Demo Police Bulletin", url: "https://example.org/demo/emu-police", publishedAt: "2026-09-24T11:00:00Z", sourceType: "demo-fixture" },
+        { publisher: "Demo National Desk", url: "https://example.org/demo/emu-national", publishedAt: "2026-09-24T12:12:00Z", sourceType: "demo-fixture" }
       ],
       verificationNotes: "Seeded Demo Mode fixture. The verification trail is simulated to exercise the same UI used by Live Mode; these source links intentionally use example.org.",
       status: "selected",
@@ -67,9 +67,9 @@ export const demoBriefing: Briefing = {
       tags: ["animal", "government", "harmless"],
       country: "South Africa",
       region: "Africa",
-      eventDate: "2026-10-01T09:00:00+02:00",
-      publicationDate: "2026-10-01T11:30:00+02:00",
-      discoveredAt: "2026-10-01T11:34:00+02:00",
+      eventDate: "2026-09-23T09:00:00+02:00",
+      publicationDate: "2026-09-23T11:30:00+02:00",
+      discoveredAt: "2026-09-23T11:34:00+02:00",
       absurdityScore: 92,
       noveltyScore: 83,
       humorScore: 94,
@@ -79,7 +79,7 @@ export const demoBriefing: Briefing = {
       seriousness: "harmless",
       clusterId: "cluster-goat-01",
       sources: [
-        { publisher: "Demo Gauteng Desk", url: "https://example.org/demo/goat-office", publishedAt: "2026-10-01T11:30:00+02:00", sourceType: "demo-fixture" },
+        { publisher: "Demo Gauteng Desk", url: "https://example.org/demo/goat-office", publishedAt: "2026-09-23T11:30:00+02:00", sourceType: "demo-fixture" },
         { publisher: "Demo Municipal Notice", url: "https://example.org/demo/goat-notice", publishedAt: "2026-10-01T12:00:00+02:00", sourceType: "demo-fixture" }
       ],
       verificationNotes: "Seeded Demo Mode fixture with simulated corroboration.",
