@@ -11,6 +11,7 @@ import { PersistentStoryRepository, recordResearchRun, getLatestResearchRun, sto
 import { GroqIntelligenceProvider } from '../lib/providers/intelligence';
 import { ElevenLabsVoiceProvider } from '../lib/providers/voice';
 import { assertDatabaseReady, getDatabase } from '../lib/database';
+import { HOME_WINDOW_MS, isHistoryPublicationDate, isHomePublicationDate } from '../lib/story-lifecycle';
 
 before(() => {
   process.env.ABSURDITY_MODE = 'demo';
@@ -35,6 +36,20 @@ test('Home and History partition the archive after seven days with no overlap', 
   assert.ok(result.stories.length > 0);
   assert.ok(result.stories.every((story: any) => story.country === 'South Africa'));
 });
+test('seven-day cutoff has no Home/History overlap or gap', () => {
+  const anchor = Date.parse('2026-10-07T12:00:00.000Z');
+  const cutoff = new Date(anchor - HOME_WINDOW_MS).toISOString();
+  const older = new Date(anchor - HOME_WINDOW_MS - 1).toISOString();
+  const future = new Date(anchor + 1).toISOString();
+
+  assert.equal(isHomePublicationDate(cutoff, anchor), true);
+  assert.equal(isHistoryPublicationDate(cutoff, anchor), false);
+  assert.equal(isHomePublicationDate(older, anchor), false);
+  assert.equal(isHistoryPublicationDate(older, anchor), true);
+  assert.equal(isHomePublicationDate(future, anchor), false);
+  assert.equal(isHistoryPublicationDate(future, anchor), false);
+});
+
 test('archive rejects noninteger, negative, and oversized limits', async () => {
   for (const limit of ['NaN', '-1', '0', '2.5', '501', 'Infinity']) {
     assert.equal((await storiesGet(new Request('http://localhost/api/stories?limit=' + limit))).status, 400);
