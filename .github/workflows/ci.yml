@@ -46,7 +46,17 @@ jobs:
 
           test -s /tmp/home.html
 
-          curl --silent --fail             -X POST http://127.0.0.1:3000/api/chat             -H "Content-Type: application/json"             -d '{"message":"Anything from Africa?"}'             > /tmp/chat.json
+          curl --silent --fail http://127.0.0.1:3000/api/live > /tmp/live.json
+          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/live.json","utf8")); if(x.status!=="ok" || x.service!=="absurdity") process.exit(1);'
+
+          curl --silent --fail "http://127.0.0.1:3000/api/stories?scope=home" > /tmp/home-stories.json
+          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/home-stories.json","utf8")); if(x.mode!=="demo" || !Array.isArray(x.stories) || x.stories.length===0) process.exit(1);'
+
+          curl --silent --fail \
+            -X POST http://127.0.0.1:3000/api/chat \
+            -H "Content-Type: application/json" \
+            -d '{"message":"Anything from Africa?"}' \
+            > /tmp/chat.json
 
           cat /tmp/chat.json
-          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/chat.json","utf8")); if(!x.text || !x.text.includes("South Africa") && x.storyId === "goat-council") process.exit(1);'
+          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/chat.json","utf8")); if(!x.text || !x.text.includes("South Africa")) process.exit(1);'
