@@ -37,7 +37,7 @@ The main reading layout intentionally stays simple:
 
 The whole reader fits one viewport. The title list and article scroll internally. Search and date fields are handled by agent instructions instead of occupying the default interface. If speech recognition is unavailable or microphone access is denied, a compact instruction box appears.
 
-On the New stories tab, a story can be dismissed with the × control or a left swipe. Favorites and dismissed-state currently persist in browser `localStorage`.
+On Home, a story can be dismissed with the × control or a left swipe. Favorites and dismissed-state currently persist in browser `localStorage`.
 
 The seeded Demo Mode is an explicit local/QA fixture mode only. It anchors its 7-day Home/History lifecycle to the newest fixture date so interaction tests stay useful after fixture dates age. Production does not fall back to fixtures: unless `ABSURDITY_MODE=demo` is explicitly set, the reader uses persistent live storage and wall-clock time.
 
@@ -46,7 +46,7 @@ The seeded Demo Mode is an explicit local/QA fixture mode only. It anchors its 7
 - Next.js / React / TypeScript
 - Tailwind CSS
 - explicit seven-story fixture mode for local/QA only; live mode never substitutes fixtures
-- New stories / Favorites / History navigation
+- Home / Favorites / History navigation
 - 7-day Home lifecycle with automatic, non-overlapping transition into History
 - permanent demo archive view
 - requested archive search by location, keywords, category and publication date
@@ -99,7 +99,7 @@ The live system now has a real persisted pipeline:
 
 `DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → EXTRACT ARTICLES → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
 
-Clicking **Refresh** or explicitly asking the agent to refresh calls `POST /api/research` to start the full pipeline from `lib/pipeline.ts`. The response returns immediately; the Refresh button spins while the reader polls `GET /api/research?id=…` and reloads the archive on completion. The question-mark logo and **Home** return to new stories without starting research. Reloading the page resumes an active cycle without launching another. The current reader remains usable during fetching. Failed archive requests preserve already loaded stories and show a retry control; a successful empty live response clears the feed without substituting demo fixtures. Ordinary navigation and voice archive searches never initiate discovery. Completion reports how many candidates were reviewed and stories selected.
+Clicking **Refresh** or explicitly asking the agent to refresh calls `POST /api/research` to start the full pipeline from `lib/pipeline.ts`. The response returns immediately; the Refresh button spins while the reader polls `GET /api/research?id=…` and reloads the archive on completion. The question-mark logo and **Home** return to the current Home feed without starting research. Reloading the page resumes an active cycle without launching another. The current reader remains usable during fetching. Failed archive requests preserve already loaded stories and show a retry control; a successful empty live response clears the feed without substituting demo fixtures. Ordinary navigation and voice archive searches never initiate discovery. Completion reports how many candidates were reviewed and stories selected.
 
 Before extraction, corroboration, or model analysis, the pipeline skips already-selected events by canonical source URL or matching event cluster within the research window. These skips do not consume the candidate cap and are recorded as `alreadySelected` in run telemetry. Unselected candidates remain eligible for later verification. Freshness is applied before publisher caps, and Exa candidates retain priority through the final shortlist.
 
@@ -173,7 +173,8 @@ Blocked, restricted, non-HTML and unreadable pages retain the available RSS/sear
 - region: Frankfurt
 - build: `npm ci && npm run build`
 - start: `npm run db:check && npm start`
-- health check: `/api/health`
+- provider-independent liveness check: `/api/live`
+- detailed database/provider diagnostics: `/api/health`
 - deployed mode: `ABSURDITY_MODE=live`; the code defaults to persistent live mode unless `ABSURDITY_MODE=demo` is explicitly set (the sample `.env.example` opts local fixture testing into demo)
 
 Provider secrets belong in the Render service environment and should never be committed.
