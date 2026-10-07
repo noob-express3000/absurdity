@@ -25,6 +25,7 @@ function hash(value: string) {
 function normalizeUrl(value: string) {
   try {
     const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
     for (const key of [...url.searchParams.keys()]) {
       if (key.startsWith("utm_") || ["fbclid", "gclid", "mc_cid", "mc_eid"].includes(key)) {
         url.searchParams.delete(key);
@@ -33,7 +34,7 @@ function normalizeUrl(value: string) {
     url.hash = "";
     return url.toString();
   } catch {
-    return value;
+    return "";
   }
 }
 
@@ -223,6 +224,7 @@ async function executeResearch(options: {
     if (discovery.scanned === 0 && discovery.failures.length) throw new Error("No news feeds could be fetched.");
 
     const inWindow = discovery.candidates.filter((candidate) => {
+      if (!normalizeUrl(candidate.url)) return false;
       if (!candidate.publishedAt) return true;
       const time = new Date(candidate.publishedAt).getTime();
       return Number.isFinite(time) ? time >= windowStart.getTime() && time <= Date.now() : true;
@@ -278,14 +280,18 @@ async function executeResearch(options: {
             excludeDomains: primaryDomain ? [primaryDomain] : undefined,
             objective: "Find independent reporting or primary-source corroboration of the exact same event. Prefer a different publisher from the discovered article.",
           });
-          searchEvidence = hits.map((hit) => ({
-            publisher: publisherFromUrl(hit.url),
-            title: hit.title,
-            url: normalizeUrl(hit.url),
-            text: hit.text,
-            kind: "search",
-            publishedAt: hit.publishedDate,
-          }));
+          searchEvidence = hits.flatMap((hit) => {
+            const url = normalizeUrl(hit.url);
+            if (!url) return [];
+            return [{
+              publisher: publisherFromUrl(url),
+              title: hit.title,
+              url,
+              text: hit.text,
+              kind: "search" as const,
+              publishedAt: hit.publishedDate,
+            }];
+          });
         } catch (error) {
           failures.push(
             "Search: " + (error instanceof Error ? error.message : "provider request failed"),
