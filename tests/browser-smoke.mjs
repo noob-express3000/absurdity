@@ -88,6 +88,19 @@ assert.equal(await page.locator('nav button[aria-current]').innerText(),'History
 assert.match(await page.evaluate(()=>window.qaSaid.at(-1)),/Escaped emu/);
 await page.getByRole('button',{name:'Stop reading'}).click();
 await page.unroute('**/api/chat');
+// Selecting a current Home story from History must route back to Home rather than
+// placing a mutually exclusive Home-aged story in the History view.
+let homeReply;
+await page.route('**/api/chat',async route=>{
+  homeReply=(await (await page.request.get(baseUrl+'/api/stories?scope=home')).json()).stories[0];
+  const action={text:'Opening the current story.',action:'select',view:null,storyId:homeReply.id,query:null,from:null,before:null,read:false};
+  await route.fulfill({contentType:'application/json',body:JSON.stringify({text:action.text,action,provider:'groq',mode:'demo'})});
+});
+await command('open a current story');
+await page.getByRole('heading',{name:()=>homeReply.title}).waitFor();
+assert.equal(await page.locator('nav button[aria-current]').innerText(),'Home');
+await page.unroute('**/api/chat');
+await page.getByRole('button',{name:'History',exact:true}).click();
 // Cancelling a delayed conversation must not navigate or speak after cancellation.
 await page.route('**/api/chat',async route=>{
   await new Promise(r=>setTimeout(r,400));
