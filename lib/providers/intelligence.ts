@@ -1,5 +1,6 @@
 import type { Story } from "../types";
 import { conversationSchema, validateConversationPlan, type ConversationTurn } from "../conversation";
+import { HOME_WINDOW_DAYS } from "../story-lifecycle";
 
 export type CandidateEvidence = {
   publisher: string;
@@ -136,7 +137,7 @@ Use previous turns to understand follow-ups, but take actions ONLY when the late
 Supported actions: none, view, next, previous, select, favorite, unfavorite, dismiss, read, search. Select requires an exact supplied story ID. Favorite/unfavorite/dismiss act on the current story unless the user explicitly identifies another supplied story. Read reads the selected story. Set read=true if the user asks to read after selecting, navigating or searching.
 Explicit refresh requests are handled separately by the app. Never claim that stories were fetched, updated or refreshed, and never turn a refresh instruction into an archive search.
 Search ONLY the stored archive when requested, never the web or new story discovery. The backend executes the search and replaces the search reply with actual results. Use view history or favorites. Query is concise keywords; ALL words must match story title/summary/location/category/tags. Normalize South African to South Africa and animals to animal. Never put instructions or dates into query. Omit geographic or category constraints unless requested.
-Use context.now for relative publication periods. Use Africa/Johannesburg (+02:00) for exact publication calendar days; from is inclusive and before exclusive, both ISO timestamps. Older stories means before context.now minus 48 hours. Leave unused query, dates, view and storyId null. Keep replies under 90 words. Do not claim an action has happened unless you return the corresponding supported action.`);
+Use context.now for relative publication periods. Use Africa/Johannesburg (+02:00) for exact publication calendar days; from is inclusive and before exclusive, both ISO timestamps. Older stories means before context.now minus ${HOME_WINDOW_DAYS} days. Leave unused query, dates, view and storyId null. Keep replies under 90 words. Do not claim an action has happened unless you return the corresponding supported action.`);
     return validateConversationPlan(extractJson(raw), new Set(stories.map(story => story.id)));
   }
 
