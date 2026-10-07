@@ -206,9 +206,9 @@ Run the deep pipeline manually with:
 npm run research:daily
 ```
 
-For zero-idle-cost scheduling, `.github/workflows/research.yml` runs at 03:17 UTC (05:17 Johannesburg) once per day by default. Set the repository variable `ENABLE_DAILY_RESEARCH=false` only as an emergency quota kill switch; manual dispatch remains available. Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as repository secrets. Groq and Exa/Tavily remain optional secrets, but Groq is required for the full editorial verification/classification layer.
+For zero-idle-cost scheduling, `.github/workflows/research.yml` runs at 03:17 UTC (05:17 Johannesburg) once per day by default. Set the repository variable `ENABLE_DAILY_RESEARCH=false` only as an emergency quota kill switch; manual dispatch remains available. The workflow calls the production Render `/api/research` endpoint and polls the returned run, so database/provider secrets remain in Render instead of being duplicated into GitHub Actions.
 
-Render remains the web host while Turso owns the persistent archive. Both Render and the GitHub Actions research job use the same Turso database, so the free Render filesystem is never treated as durable storage.
+Render remains the web host and executes research with its configured Exa/Groq/Turso environment, while Turso owns the persistent archive. GitHub Actions only schedules and observes that production run, so the free Render filesystem is never treated as durable storage.
 
 The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Groq secrets during deployment.
 
