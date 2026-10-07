@@ -14,37 +14,61 @@ jobs:
     # an emergency quota kill switch; manual dispatch always remains available.
     if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_DAILY_RESEARCH != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
-      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
-      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
-      EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
-      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-      ABSURDITY_MODE: live
-      RESEARCH_WINDOW_HOURS: ${{ vars.RESEARCH_WINDOW_HOURS || '30' }}
-      RESEARCH_MAX_CANDIDATES: ${{ vars.RESEARCH_MAX_CANDIDATES || '12' }}
-      EXA_DISCOVERY_RESULTS_PER_QUERY: ${{ vars.EXA_DISCOVERY_RESULTS_PER_QUERY || '6' }}
-      ABSURDITY_REQUIRE_TURSO: "true"
+      ABSURDITY_URL: ${{ vars.ABSURDITY_URL || 'https://absurdity.onrender.com' }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Require Turso credentials
+      - name: Trigger production research
+        shell: bash
         run: |
-          if [ -z "$TURSO_DATABASE_URL" ] || [ -z "$TURSO_AUTH_TOKEN" ]; then
-            echo "TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are required for scheduled research."
+          set -euo pipefail
+          BASE_URL="${ABSURDITY_URL%/}"
+
+          request() {
+            curl --fail-with-body --silent --show-error \
+              --retry 3 --retry-all-errors --retry-delay 5 \
+              --max-time 90 "$@"
+          }
+
+          RESPONSE="$(request -X POST "$BASE_URL/api/research")"
+          RUN_ID="$(RESPONSE="$RESPONSE" python3 -c 'import json,os; x=json.loads(os.environ["RESPONSE"]); assert x.get("run",{}).get("id"); print(x["run"]["id"])')"
+          STATUS="$(RESPONSE="$RESPONSE" python3 -c 'import json,os; print(json.loads(os.environ["RESPONSE"]).get("run",{}).get("status",""))')"
+
+          echo "Research run: $RUN_ID"
+          echo "Initial status: $STATUS"
+
+          if [ "$STATUS" = "complete" ]; then
+            exit 0
+          fi
+          if [ "$STATUS" = "failed" ]; then
+            echo "Research was already in a failed terminal state."
+            exit 1
+          fi
+          if [ "$STATUS" != "running" ]; then
+            echo "Unexpected research status: $STATUS"
             exit 1
           fi
 
-      - name: Run daily research pipeline
-        run: npm run research:daily
+          for attempt in {1..120}; do
+            sleep 10
+            RESPONSE="$(request "$BASE_URL/api/research?id=$RUN_ID")"
+            STATUS="$(RESPONSE="$RESPONSE" python3 -c 'import json,os; print(json.loads(os.environ["RESPONSE"]).get("run",{}).get("status",""))')"
+
+            if [ "$STATUS" = "complete" ]; then
+              SELECTED="$(RESPONSE="$RESPONSE" python3 -c 'import json,os; print(json.loads(os.environ["RESPONSE"]).get("run",{}).get("selected",0))')"
+              echo "Research completed; selected $SELECTED story/stories."
+              exit 0
+            fi
+            if [ "$STATUS" = "failed" ]; then
+              echo "Research run failed."
+              exit 1
+            fi
+            if [ "$STATUS" != "running" ]; then
+              echo "Unexpected research status: $STATUS"
+              exit 1
+            fi
+          done
+
+          echo "Research did not reach a terminal state within 20 minutes."
+          exit 1
