@@ -1,6 +1,6 @@
 # QA: notebook reader and reliability fixes
 
-## Latest reliability pass — 2026-10-06
+## Latest reliability pass — 2026-10-07
 
 - Fixed repeat processing of selected stories: canonical URLs and recent event clusters are checked before paid provider work and the candidate cap. Unselected candidates remain eligible; unrelated later events may reuse a headline.
 - Applied the date window before publisher caps and preserved Exa priority in the final shortlist.
@@ -10,7 +10,8 @@
 - Updated browser checks and README for separate Home and Refresh controls and honest empty live archives.
 - Added constant-query archive hydration: History now loads story rows, sources and research steps in three database queries instead of two child queries per story; the regression suite asserts the query count stays constant as the archive grows.
 - Restored the compact publication-date/verification footer and enabled daily scheduled research by default, with `ENABLE_DAILY_RESEARCH=false` retained as a quota kill switch.
-- Verified: **59 automated tests**, TypeScript and the production build before the final UI/documentation sweep. Browser provider/voice responses are stubbed; database regressions use isolated SQLite. Production Turso/provider credentials remain runtime checks.
+- Added final lifecycle/security hardening: 7-day Home/History semantics are shared across navigation and Groq planning, production voice mode is server-authoritative so clients cannot force demo fixtures, remote source links are restricted to HTTP/HTTPS, and the Turso driver is pinned for reproducible installs.
+- Verified: **62 automated tests**, TypeScript and the production build. Browser provider/voice responses are stubbed; database regressions use isolated SQLite. Production Turso/provider credentials remain runtime checks.
 
 ## Product layout
 
@@ -21,11 +22,11 @@ The reader now follows that layout. Per-story category badges, ranked metadata, 
 ## Verified
 
 - Production build and TypeScript.
-- 53 automated regressions: archive/search with combined criteria and date bounds, navigation parsing, Johannesburg publication days, API validation, demo grounding, narration fallback, healthy and degraded database readiness, empty-database initialization, required-Turso startup protection, atomic story/source/research rollback, SQLite story/source/research persistence, 7-day Home/History partitioning and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures, structured conversation plans, article/history context, rejection of invented actions/IDs, exclusion of reasoning text, actual archive result counts and safe live fallback.
+- 62 automated regressions: archive/search with combined criteria and date bounds, navigation parsing, Johannesburg publication days, API validation, demo grounding, narration fallback, healthy and degraded database readiness, empty-database initialization, required-Turso startup protection, atomic story/source/research rollback, SQLite story/source/research persistence, 7-day Home/History partitioning and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures, structured conversation plans, article/history context, rejection of invented actions/IDs, exclusion of reasoning text, actual archive result counts and safe live fallback.
 - Browser checks at 1366×768, 1280×720, 360×640, 360×800 and 844×390 in Africa/Johannesburg: repeated voice next commands, favorite/favorites distinction, favorite and dismissal reload persistence, requested geography/category/older/favorites search, typed navigation after microphone denial, dismiss/restore, source links, browser speech fallback, cancellation during narration preparation, conversational context, microphone pause/resume, echo suppression and cancellation of pending conversation actions.
 - No page errors, page-level scrolling or horizontal overflow in those browser checks.
 
-Speech recognition and synthesis are stubbed for repeatable control tests, so real microphone recognition and audible playback still require device testing. Live Render/Turso connectivity was verified on 2026-10-06 before the persistence hardening. The current deployment now requires Turso explicitly, performs a database readiness check before startup and before scheduled research, creates schema on an empty database, and uses atomic batches for story/source/research updates. Hosted provider credentials and audible ElevenLabs playback are external runtime checks rather than claims made by CI.
+Speech recognition and synthesis are stubbed for repeatable control tests, so real microphone recognition and audible playback still require device testing. Live Render/Turso startup and deployment behavior was rechecked on 2026-10-07 after the final hardening pass. The current deployment now requires Turso explicitly, performs a database readiness check before startup and before scheduled research, creates schema on an empty database, and uses atomic batches for story/source/research updates. Hosted provider credentials and audible ElevenLabs playback are external runtime checks rather than claims made by CI.
 
 ## Run checks
 
