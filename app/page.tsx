@@ -8,7 +8,7 @@ import { parseNavigation } from "@/lib/navigation";
 import type { ConversationTurn } from "@/lib/conversation";
 import type { ResearchCycle } from "@/lib/research-cycle";
 import type { VoiceReply } from "@/lib/voice-agent";
-import { isHistoryPublicationDate, isHomePublicationDate } from "@/lib/story-lifecycle";
+import { HOME_WINDOW_DAYS, isHistoryPublicationDate, isHomePublicationDate } from "@/lib/story-lifecycle";
 
 type Tab = "home" | "favorites" | "history";
 type VoiceState = "idle" | "loading" | "playing";
@@ -504,7 +504,7 @@ export default function Home() {
         case "view":
           if (plan.view) {
             changeTab(plan.view);
-            target = (plan.view === "home" ? homeStories : plan.view === "favorites" ? favoriteStories : stories)[0];
+            target = (plan.view === "home" ? homeStories : plan.view === "favorites" ? favoriteStories : historyStories)[0];
             if (target) setSelectedId(target.id);
           }
           break;
@@ -516,7 +516,14 @@ export default function Home() {
         }
         case "select": case "read":
           if (target) {
-            if (!visibleStories.some(story => story.id === target!.id)) changeTab("history");
+            if (!visibleStories.some(story => story.id === target!.id)) {
+              if (isHomePublicationDate(target.publicationDate, anchorTime)) {
+                setDismissed(current => current.filter(id => id !== target!.id));
+                changeTab("home");
+              } else {
+                changeTab("history");
+              }
+            }
             setSelectedId(target.id);
             stopNarration();
           }
@@ -636,7 +643,7 @@ export default function Home() {
   }
 
   const tabTitle =
-    tab === "home" ? "New stories" : tab === "favorites" ? "Favorites" : "History";
+    tab === "home" ? "Home" : tab === "favorites" ? "Favorites" : "History";
 
   const emptyMessage =
     archiveError ? "The story archive is temporarily unavailable."
@@ -644,7 +651,7 @@ export default function Home() {
     : tab === "home"
       ? dismissed.length
         ? "You cleared the current feed. Restore dismissed stories to review it again."
-        : "No stories landed in the current two-day window."
+        : `No stories landed in the last ${HOME_WINDOW_DAYS} days.`
       : tab === "favorites"
         ? "No favorites yet. Save a story with the star."
         : "No archived stories match this search and timeframe.";
@@ -656,7 +663,7 @@ export default function Home() {
           <button className="brand-icon" onClick={() => changeTab("home")} aria-label="Home" title="Home">
             <span aria-hidden="true">?</span>
           </button>
-          <button className="brand-home" onClick={() => changeTab("home")} aria-label="New stories" aria-current={tab === "home" ? "page" : undefined}>
+          <button className="brand-home" onClick={() => changeTab("home")} aria-label="Home" aria-current={tab === "home" ? "page" : undefined}>
             <h1 className="brand-name">Absurdity</h1>
           </button>
         </div>
