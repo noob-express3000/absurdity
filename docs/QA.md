@@ -11,7 +11,7 @@
 - Added constant-query archive hydration: History now loads story rows, sources and research steps in three database queries instead of two child queries per story; the regression suite asserts the query count stays constant as the archive grows.
 - Restored the compact publication-date/verification footer and enabled daily scheduled research by default, with `ENABLE_DAILY_RESEARCH=false` retained as a quota kill switch.
 - Added final lifecycle/security hardening: 7-day Home/History semantics are shared across navigation and Groq planning, production voice mode is server-authoritative so clients cannot force demo fixtures, remote source links are restricted to HTTP/HTTPS, and the Turso driver is pinned for reproducible installs.
-- Verified: **62 automated tests**, TypeScript and the production build. Browser provider/voice responses are stubbed; database regressions use isolated SQLite. Production Turso/provider credentials remain runtime checks.
+- Verified: **63 automated tests**, TypeScript and the production build. Browser provider/voice responses are stubbed; database regressions use isolated SQLite. Production Turso/provider credentials remain runtime checks.
 
 ## Product layout
 
@@ -22,7 +22,7 @@ The reader now follows that layout. Per-story category badges, ranked metadata, 
 ## Verified
 
 - Production build and TypeScript.
-- 62 automated regressions: archive/search with combined criteria and date bounds, navigation parsing, Johannesburg publication days, API validation, demo grounding, narration fallback, healthy and degraded database readiness, empty-database initialization, required-Turso startup protection, atomic story/source/research rollback, SQLite story/source/research persistence, 7-day Home/History partitioning and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures, structured conversation plans, article/history context, rejection of invented actions/IDs, exclusion of reasoning text, actual archive result counts and safe live fallback.
+- 63 automated regressions: archive/search with combined criteria and date bounds, navigation parsing, Johannesburg publication days, API validation, demo grounding, narration fallback, healthy and degraded database readiness, empty-database initialization, required-Turso startup protection, atomic story/source/research rollback, SQLite story/source/research persistence, 7-day Home/History partitioning and future-date filtering, permanent selected history, research-run telemetry, Groq response validation and provider failures, structured conversation plans, article/history context, rejection of invented actions/IDs, exclusion of reasoning text, actual archive result counts and safe live fallback.
 - Browser checks at 1366×768, 1280×720, 360×640, 360×800 and 844×390 in Africa/Johannesburg: repeated voice next commands, favorite/favorites distinction, favorite and dismissal reload persistence, requested geography/category/older/favorites search, typed navigation after microphone denial, dismiss/restore, source links, browser speech fallback, cancellation during narration preparation, conversational context, microphone pause/resume, echo suppression and cancellation of pending conversation actions.
 - No page errors, page-level scrolling or horizontal overflow in those browser checks.
 
