@@ -25,9 +25,9 @@ Absurdity should:
 
 The application has three primary tabs:
 
-- **New stories** — stories from the current 48-hour window.
+- **Home** — selected stories published within the last 7 days.
 - **Favorites** — stories the user saved.
-- **History** — the permanent archive, navigated and searched through the agent on request.
+- **History** — selected stories older than 7 days. Home and History are mutually exclusive age buckets; a story can never appear in both at once.
 
 The main reading layout intentionally stays simple:
 
@@ -39,7 +39,7 @@ The whole reader fits one viewport. The title list and article scroll internally
 
 On the New stories tab, a story can be dismissed with the × control or a left swipe. Favorites and dismissed-state currently persist in browser `localStorage`.
 
-The seeded Demo Mode is an explicit local/QA fixture mode only. It anchors its 48-hour window to the newest fixture date so interaction tests stay useful after fixture dates age. Production does not fall back to fixtures: unless `ABSURDITY_MODE=demo` is explicitly set, the reader uses persistent live storage and wall-clock time.
+The seeded Demo Mode is an explicit local/QA fixture mode only. It anchors its 7-day Home/History lifecycle to the newest fixture date so interaction tests stay useful after fixture dates age. Production does not fall back to fixtures: unless `ABSURDITY_MODE=demo` is explicitly set, the reader uses persistent live storage and wall-clock time.
 
 ## Current implementation
 
@@ -47,7 +47,7 @@ The seeded Demo Mode is an explicit local/QA fixture mode only. It anchors its 4
 - Tailwind CSS
 - explicit seven-story fixture mode for local/QA only; live mode never substitutes fixtures
 - New stories / Favorites / History navigation
-- 48-hour home-feed rule
+- 7-day Home lifecycle with automatic, non-overlapping transition into History
 - permanent demo archive view
 - requested archive search by location, keywords, category and publication date
 - favorites persistence
@@ -195,7 +195,7 @@ The backend now implements the production data seam discussed for Absurdity:
 - Built-in SQLite fallback for local development when Turso is absent.
 - Automatic SQLite/libSQL schema initialization plus `db/migrations/001_init.sql` as the canonical schema.
 - Permanent story/source/research-run records.
-- `/api/stories` for the current 48-hour briefing or searchable selected-story history.
+- `/api/stories` for mutually exclusive 7-day Home and older-than-7-days History scopes, plus an internal all-selected scope used to hydrate Favorites and the reader.
 - A daily pipeline that uses Exa as primary discovery when configured, adds RSS secondary/fallback candidates, calls Exa/Tavily for independent corroboration, uses Groq only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
 - Provider usage and failures are recorded per research run.
 
