@@ -19,10 +19,19 @@ before(() => {
 });
 const request = (body: unknown) => new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) });
 
-test('archive contains all fixtures and place search works', async () => {
-  const all = await (await storiesGet(new Request('http://localhost/api/stories'))).json();
+test('Home and History partition the archive after seven days with no overlap', async () => {
+  const all = await (await storiesGet(new Request('http://localhost/api/stories?scope=all'))).json();
+  const home = await (await storiesGet(new Request('http://localhost/api/stories?scope=home'))).json();
+  const history = await (await storiesGet(new Request('http://localhost/api/stories?scope=history'))).json();
   assert.equal(all.stories.length, demoBriefing.stories.length);
-  const result = await (await storiesGet(new Request('http://localhost/api/stories?q=South%20Africa'))).json();
+  assert.ok(home.stories.length > 0);
+  assert.ok(history.stories.length > 0);
+  const homeIds = new Set(home.stories.map((story: any) => story.id));
+  const historyIds = new Set(history.stories.map((story: any) => story.id));
+  assert.equal([...homeIds].some(id => historyIds.has(id)), false);
+  assert.deepEqual(new Set([...homeIds, ...historyIds]), new Set(all.stories.map((story: any) => story.id)));
+
+  const result = await (await storiesGet(new Request('http://localhost/api/stories?scope=history&q=South%20Africa'))).json();
   assert.ok(result.stories.length > 0);
   assert.ok(result.stories.every((story: any) => story.country === 'South Africa'));
 });
