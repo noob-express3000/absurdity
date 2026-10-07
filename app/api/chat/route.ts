@@ -15,13 +15,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
     if (message.length > 2000) return NextResponse.json({ error: "Message is too long." }, { status: 400 });
+    if (storyId && storyId.length > 150) return NextResponse.json({ error: "Story ID is too long." }, { status: 400 });
     if (body.voice === true) {
       const scope = ["home", "favorites", "history"].includes(body.scope) ? body.scope : "home";
       const visibleIds = Array.isArray(body.visibleIds) ? body.visibleIds.filter((id: unknown) => typeof id === "string" && id.length <= 150).slice(0, 24) : [];
       const history: ConversationTurn[] = Array.isArray(body.history)
         ? body.history.filter((turn: any) => ["user", "assistant"].includes(turn?.role) && typeof turn?.content === "string")
           .slice(-8).map((turn: ConversationTurn) => ({ role: turn.role, content: turn.content.slice(0, 2000) })) : [];
-      return NextResponse.json(await replyToVoice({ message, storyId, scope, visibleIds, history, displayMode: body.displayMode === "demo" ? "demo" : "live" }));
+      const displayMode = process.env.ABSURDITY_MODE === "demo" ? "demo" : "live";
+      return NextResponse.json(await replyToVoice({ message, storyId, scope, visibleIds, history, displayMode }));
     }
 
     const briefing = await storyRepository.getCurrentBriefing();
