@@ -177,9 +177,9 @@ export const demoBriefing: Briefing = {
       tags: ["prank", "infrastructure", "harmless"],
       country: "Spain",
       region: "Europe",
-      eventDate: "2026-10-01T04:15:00Z",
-      publicationDate: "2026-10-01T08:45:00Z",
-      discoveredAt: "2026-10-01T08:49:00Z",
+      eventDate: "2026-09-22T04:15:00Z",
+      publicationDate: "2026-09-22T08:45:00Z",
+      discoveredAt: "2026-09-22T08:49:00Z",
       absurdityScore: 82,
       noveltyScore: 76,
       humorScore: 80,
@@ -189,8 +189,8 @@ export const demoBriefing: Briefing = {
       seriousness: "harmless",
       clusterId: "cluster-foam-01",
       sources: [
-        { publisher: "Demo Iberia Local", url: "https://example.org/demo/foam", publishedAt: "2026-10-01T08:45:00Z", sourceType: "demo-fixture" },
-        { publisher: "Demo City Statement", url: "https://example.org/demo/foam-city", publishedAt: "2026-10-01T09:20:00Z", sourceType: "demo-fixture" }
+        { publisher: "Demo Iberia Local", url: "https://example.org/demo/foam", publishedAt: "2026-09-22T08:45:00Z", sourceType: "demo-fixture" },
+        { publisher: "Demo City Statement", url: "https://example.org/demo/foam-city", publishedAt: "2026-09-22T09:20:00Z", sourceType: "demo-fixture" }
       ],
       verificationNotes: "Seeded Demo Mode fixture with simulated city confirmation.",
       status: "selected",
