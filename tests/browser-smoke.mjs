@@ -97,7 +97,7 @@ await page.route('**/api/chat',async route=>{
   await route.fulfill({contentType:'application/json',body:JSON.stringify({text:action.text,action,provider:'groq',mode:'demo'})});
 });
 await command('open a current story');
-await page.getByRole('heading',{name:()=>homeReply.title}).waitFor();
+await page.waitForFunction(title=>document.querySelector('article h2')?.textContent===title,homeReply.title);
 assert.equal(await page.locator('nav button[aria-current]').innerText(),'Home');
 await page.unroute('**/api/chat');
 await page.getByRole('button',{name:'History',exact:true}).click();
