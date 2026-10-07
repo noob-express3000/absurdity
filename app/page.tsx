@@ -490,7 +490,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ voice: true, message, storyId: visibleStories.length ? selected.id : undefined,
           scope: tab, visibleIds: visibleStories.slice(0, 24).map(story => story.id),
-          history: conversationRef.current, displayMode: usingLive ? "live" : "demo" }),
+          history: conversationRef.current }),
       });
       if (!response.ok) throw new Error("Conversation unavailable");
       const reply: VoiceReply = await response.json();
