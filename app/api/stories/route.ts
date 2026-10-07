@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { storyRepository } from "@/lib/repository";
+import { demoBriefing } from "@/lib/demo-data";
+import { clampHistoryBefore } from "@/lib/story-lifecycle";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,6 +10,9 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const scope = url.searchParams.get("scope") || "history";
+    if (!["home", "history", "all"].includes(scope)) {
+      return NextResponse.json({ error: "Scope must be home, history, or all." }, { status: 400 });
+    }
     const query = url.searchParams.get("q") || "";
     const limit = Number(url.searchParams.get("limit") || 200);
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
@@ -30,12 +35,18 @@ export async function GET(request: Request) {
       });
     }
 
+    const mode = process.env.ABSURDITY_MODE === "demo" ? "demo" : "live";
+    const anchor = mode === "demo"
+      ? Math.max(...demoBriefing.stories.map((story) => Date.parse(story.publicationDate)))
+      : Date.now();
     const stories = await storyRepository.searchStories(query, limit, {
       from: from ? new Date(from).toISOString() : undefined,
-      before: before ? new Date(before).toISOString() : undefined,
+      before: scope === "history"
+        ? clampHistoryBefore(before ? new Date(before).toISOString() : undefined, anchor)
+        : before ? new Date(before).toISOString() : undefined,
     });
     return NextResponse.json({
-      mode: process.env.ABSURDITY_MODE === "demo" ? "demo" : "live",
+      mode,
       stories,
     });
   } catch (error) {
