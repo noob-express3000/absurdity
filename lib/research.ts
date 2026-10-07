@@ -98,6 +98,7 @@ export function scoreHeadlineLocally(title: string, snippet = "") {
 function normalizeUrl(value: string) {
   try {
     const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
     for (const key of [...url.searchParams.keys()]) {
       if (key.startsWith("utm_") || ["fbclid", "gclid", "mc_cid", "mc_eid"].includes(key)) {
         url.searchParams.delete(key);
@@ -106,7 +107,7 @@ function normalizeUrl(value: string) {
     url.hash = "";
     return url.toString();
   } catch {
-    return value;
+    return "";
   }
 }
 
@@ -160,10 +161,12 @@ export async function runLightweightDiscovery(options: {
         const parsed = await (options.parseFeed ?? (url => parser.parseURL(url)))(feed.url);
         for (const item of parsed.items.slice(0, 60)) {
           if (!item.title || !item.link) continue;
+          const url = normalizeUrl(item.link);
+          if (!url) continue;
           const snippet = item.contentSnippet || item.content || "";
           candidates.push({
             title: item.title,
-            url: item.link,
+            url,
             publisher: feed.publisher,
             publishedAt: item.isoDate || item.pubDate,
             snippet: snippet.slice(0, 400),
@@ -226,10 +229,12 @@ export async function runDiscovery(options: {
       });
       for (const hit of results) {
         if (!hit?.url || !hit?.title) continue;
+        const url = normalizeUrl(hit.url);
+        if (!url) continue;
         const snippet = hit.text?.trim() || "";
         exaCandidates.push({
           title: hit.title,
-          url: hit.url,
+          url,
           publisher: publisherFromUrl(hit.url),
           publishedAt: hit.publishedDate,
           snippet: snippet.slice(0, 500),
