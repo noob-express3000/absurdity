@@ -30,8 +30,8 @@ services:
       - key: TURSO_AUTH_TOKEN
         sync: false
       - key: RESEARCH_WINDOW_HOURS
-        value: "30"
+        value: "48"
       - key: RESEARCH_MAX_CANDIDATES
-        value: "12"
+        value: "18"
       - key: EXA_DISCOVERY_RESULTS_PER_QUERY
-        value: "6"
+        value: "8"
