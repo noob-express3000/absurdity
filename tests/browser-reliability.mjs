@@ -6,7 +6,7 @@ const browser = await chromium.launch({ headless: true, ...(process.env.QA_CHROM
 try {
   const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
   const errors = [];
-  const archiveAlert = page.locator('.agent-reply[role="alert"]');
+  const archiveAlert = page.locator('.archive-failure[role="alert"]');
   page.on('pageerror', error => errors.push(error.message));
   const base = process.env.QA_BASE_URL || 'http://127.0.0.1:3000';
   const seed = (await (await page.request.get(base + '/api/stories')).json()).stories[0];
@@ -24,6 +24,8 @@ try {
 
   await page.goto(base);
   await archiveAlert.waitFor();
+  assert.equal(await page.locator('.agent-reply[role="alert"]').count(), 0, 'archive errors must not use the floating conversation popup');
+  assert.equal(await page.getByText('Archive unavailable', { exact: true }).count(), 1, 'archive failure should render once');
   assert.equal(await page.locator('.story-row').count(), 0, 'failed load must not invent a demo feed');
   assert.equal(await page.getByText('Loading stories…', { exact: true }).count(), 0);
   phase = 'malformed';
