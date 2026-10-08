@@ -33,36 +33,52 @@ export const RESEARCH_FEEDS = [
 
 export const EXA_DISCOVERY_LENSES = [
   {
-    label: "local incidents",
-    query: "bizarre unusual unexpected local news incident real event",
+    label: "local absurdities",
+    query: "bizarre unbelievable but true local news incident unexpected situation residents officials real event",
   },
   {
-    label: "animals",
-    query: "strange unusual animal wildlife incident local news real event",
+    label: "animals where they should not be",
+    query: "escaped animal enters store airport school house vehicle bizarre local news real event",
   },
   {
-    label: "public authorities",
-    query: "bizarre unusual police government municipal incident local news",
+    label: "failed crimes and bizarre thefts",
+    query: "bizarre failed robbery unusual thief theft strange crime local news real event",
   },
   {
-    label: "transport",
-    query: "bizarre unusual transport airport train road travel incident news",
+    label: "bureaucracy and authority blunders",
+    query: "bizarre government council police administrative error mix-up wrong person wrong address local news",
   },
   {
-    label: "science and technology",
-    query: "unexpected strange science technology robot AI experiment incident news",
+    label: "courts and lawsuits",
+    query: "bizarre lawsuit unusual court case judge strange legal dispute local news real event",
   },
   {
-    label: "courts",
-    query: "unusual bizarre court legal case lawsuit local news",
+    label: "transport chaos",
+    query: "bizarre passenger luggage airport train bus road vehicle incident unexpected local news",
   },
   {
-    label: "culture",
-    query: "odd unusual festival food competition record cultural event local news",
+    label: "mistaken identity and accidents",
+    query: "mistaken identity accidentally wrong house wrong person wrong address bizarre mix-up local news",
   },
   {
-    label: "global regional",
-    query: "bizarre unusual local news Africa Asia Latin America Oceania Europe real event",
+    label: "impossible discoveries",
+    query: "strange discovery found inside wall luggage toilet vehicle house bizarre local news real event",
+  },
+  {
+    label: "food competitions and records",
+    query: "bizarre food competition unusual world record contest festival local news real event",
+  },
+  {
+    label: "technology gone sideways",
+    query: "robot drone AI machine glitch bizarre technology incident unexpected local news real event",
+  },
+  {
+    label: "improbable coincidences and rescues",
+    query: "extraordinary coincidence improbable rescue bizarre survival unexpected real event local news",
+  },
+  {
+    label: "global regional oddities",
+    query: "bizarre unbelievable local news Africa Asia Latin America Oceania Europe strange real event",
   },
 ] as const;
 
@@ -207,10 +223,10 @@ export async function runDiscovery(options: {
   if (!hasExa) return rssPromise;
 
   const now = options.now ?? new Date();
-  const windowHours = Math.max(24, options.windowHours ?? Number(process.env.RESEARCH_WINDOW_HOURS || 30));
+  const windowHours = Math.max(24, options.windowHours ?? Number(process.env.RESEARCH_WINDOW_HOURS || 48));
   const startPublishedDate = new Date(now.getTime() - windowHours * 60 * 60 * 1000).toISOString();
   const endPublishedDate = now.toISOString();
-  const resultsPerQuery = Math.max(3, Math.min(10, options.resultsPerQuery ?? Number(process.env.EXA_DISCOVERY_RESULTS_PER_QUERY || 6)));
+  const resultsPerQuery = Math.max(3, Math.min(10, options.resultsPerQuery ?? Number(process.env.EXA_DISCOVERY_RESULTS_PER_QUERY || 8)));
   const exaProvider = options.searchWeb ? null : new ExaSearchProvider();
   const exa = options.searchWeb ?? exaProvider!.search.bind(exaProvider);
   const exaCandidates: DiscoveredCandidate[] = [];
@@ -225,7 +241,7 @@ export async function runDiscovery(options: {
         moderation: true,
         startPublishedDate,
         endPublishedDate,
-        objective: "Find factual, recent reporting of genuinely unusual real-world events. Prefer local or primary reporting and diverse publishers; avoid generic opinion, evergreen lists, fiction, satire and SEO roundups.",
+        objective: "Find factual, recent reporting of high-surprise real-world events with a concrete 'that cannot be real' hook. Prioritize absurd mix-ups, improbable situations, bizarre official incidents, animals in unexpected places, failed crimes, strange discoveries and unusual competitions. Prefer local or primary reporting and diverse publishers. Reject merely uncommon or mildly quirky human-interest stories, generic opinion, evergreen lists, fiction, satire and SEO roundups.",
       });
       for (const hit of results) {
         if (!hit?.url || !hit?.title) continue;
