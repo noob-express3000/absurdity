@@ -220,7 +220,9 @@ verificationNotes (string),
 corroboratingUrls (array containing only URLs from EVIDENCE that clearly report the same event).
 
 Selection policy:
-- select genuinely unusual or absurd real-world events worth preserving in a strange-news archive;
+- select genuinely absurd, high-surprise real-world events worth preserving in a strange-news archive;
+- selected=true should have a clear "you have to hear this" hook: an improbable mix-up, bizarre official action, animal in an unexpected place, failed crime, strange discovery, extreme coincidence, unusual competition, or similarly concrete reversal of normal expectations;
+- do not select something merely because it is rare, mildly quirky, wholesome, unusual wording, or generic human-interest;
 - require factual support rather than merely funny wording;
 - keep serious incidents serious and set humorScore low or zero when humor would be inappropriate;
 - use low confidence when evidence is thin or ambiguous;
