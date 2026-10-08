@@ -301,6 +301,10 @@ ABSURDITY_MODE=demo
 
 Otherwise the application runs against the persistent live archive.
 
+## License
+
+Absurdity is open-source software released under the [MIT License](LICENSE).
+
 ## Status
 
 Absurdity is feature-complete for the current submission build. The repository includes automated regression coverage, production build checks, browser smoke/reliability checks, Turso startup validation, and Render deployment health checks.
