@@ -184,8 +184,8 @@ async function executeResearch(options: {
 }) {
   const startedAt = new Date();
   const runId = options.runId;
-  const windowHours = Math.max(24, Number(process.env.RESEARCH_WINDOW_HOURS || 30));
-  const maxCandidates = Math.max(1, Math.min(30, Number(process.env.RESEARCH_MAX_CANDIDATES || 12)));
+  const windowHours = Math.max(24, Number(process.env.RESEARCH_WINDOW_HOURS || 48));
+  const maxCandidates = Math.max(1, Math.min(30, Number(process.env.RESEARCH_MAX_CANDIDATES || 18)));
   const windowStart = new Date(startedAt.getTime() - windowHours * 60 * 60 * 1000);
   const failures: string[] = [];
   const providerUsage = {
