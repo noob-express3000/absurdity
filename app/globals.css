@@ -185,6 +185,24 @@ button {
 
 .data-mode:empty { display: none; }
 
+.archive-status {
+  margin-left: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.72);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.archive-status:hover {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--line-strong);
+}
+
 .reading-layout {
   flex: 1;
   min-height: 0;
@@ -195,6 +213,68 @@ button {
   background: var(--paper);
   box-shadow: var(--shadow);
   overflow: hidden;
+}
+
+.archive-failure {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 32px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(0,0,0,.025), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #fbfbfb 100%);
+}
+
+.archive-failure-card {
+  width: min(360px, 100%);
+  text-align: center;
+}
+
+.archive-failure-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 18px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.05);
+}
+
+.archive-failure h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -.4px;
+}
+
+.archive-failure p {
+  margin: 10px auto 0;
+  max-width: 32ch;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.archive-failure button {
+  min-height: 36px;
+  margin-top: 18px;
+  padding: 0 14px;
+  border-radius: 9px;
+  background: var(--ink);
+  color: white;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.archive-failure button:hover {
+  background: #222222;
+  transform: translateY(-1px);
 }
 
 .story-sidebar {
@@ -730,6 +810,22 @@ button {
   }
 
   .data-mode { font-size: 8px; }
+
+  .archive-status {
+    max-width: 112px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 6px 8px;
+    font-size: 9px;
+  }
+
+  .archive-failure {
+    padding: 22px;
+  }
+
+  .archive-failure h2 {
+    font-size: 18px;
+  }
 
   .reading-layout {
     grid-template-columns: 1fr;
