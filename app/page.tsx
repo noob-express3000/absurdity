@@ -646,8 +646,7 @@ export default function Home() {
     tab === "home" ? "Home" : tab === "favorites" ? "Favorites" : "History";
 
   const emptyMessage =
-    archiveError ? "The story archive is temporarily unavailable."
-    : dataMode === "loading" ? "Loading stories…"
+    dataMode === "loading" ? "Loading stories…"
     : tab === "home"
       ? dismissed.length
         ? "You cleared the current feed. Restore dismissed stories to review it again."
@@ -655,6 +654,8 @@ export default function Home() {
       : tab === "favorites"
         ? "No favorites yet. Save a story with the star."
         : "No archived stories match this search and timeframe.";
+
+  const archiveUnavailable = Boolean(archiveError && !stories.length);
 
   return (
     <main className="reader-app">
@@ -688,9 +689,27 @@ export default function Home() {
         <span className="data-mode" title={usingLive ? "Live story archive" : "These stories are demonstration fixtures"}>
           {usingLive ? "" : "Demo"}
         </span>
+        {archiveError && stories.length > 0 && (
+          <button className="archive-status" onClick={() => void reloadArchive().catch(() => {})} aria-label="Retry archive sync">
+            Archive sync paused · Retry
+          </button>
+        )}
       </header>
 
       <section className="reading-layout" aria-label={tabTitle}>
+        {archiveUnavailable ? (
+          <div className="archive-failure" role="alert">
+            <div className="archive-failure-card">
+              <div className="archive-failure-mark" aria-hidden="true">↻</div>
+              <h2>Archive unavailable</h2>
+              <p>Absurdity couldn’t reach the story archive. Your saved stories are still safe in Turso.</p>
+              <button onClick={() => void reloadArchive().catch(() => {})} aria-label="Retry loading stories">
+                Try again
+              </button>
+            </div>
+          </div>
+        ) : (
+        <>
         <aside className="story-sidebar" aria-label="Story titles">
           <div className="story-list abs-scrollbar">
             {visibleStories.length ? visibleStories.map((story) => (
@@ -749,7 +768,6 @@ export default function Home() {
             ) : <p className="empty-state">{emptyMessage}</p>}
           </div>
           <div className="reader-bottom">
-            {archiveError && <div className="agent-reply" role="alert"><p>{archiveError}</p><button onClick={() => void reloadArchive().catch(() => {})} aria-label="Retry loading stories">Retry</button></div>}
             {showAgentPrompt && <form className="agent-prompt" onSubmit={(event) => { event.preventDefault(); handleVoiceCommand(agentPrompt); setAgentPrompt(""); }}>
               {agentReply && <p>{agentReply}</p>}
               <div><input aria-label="Ask Absurdity to navigate" maxLength={2000} value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
@@ -768,6 +786,8 @@ export default function Home() {
             </div>
           </div>
         </article>
+        </>
+        )}
       </section>
       {(fetchHint || narrationHint) && <div className="fetch-notice" role="status">{fetchHint || narrationHint}</div>}
       <div className="voice-status" role="status" aria-live="polite">
