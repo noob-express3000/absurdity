@@ -1,217 +1,308 @@
 # Absurdity
 
-Absurdity is a global strange-news reader. It continuously gathers unusual stories, keeps the useful history, and gives the user a simple place to read, save, dismiss, search and listen to them.
+Absurdity is a strange-news reader that finds unusual real stories, checks them against source material, stores them, and lets you read or listen to them later.
 
-The product rule is simple:
+The product idea is simple:
 
-> **Find the stories that make the world feel stranger, then get out of the user's way.**
+> Find the stories that make the world feel stranger, verify them, then get out of the reader's way.
 
-## Product contract
+## What it does
 
-Absurdity should:
+Absurdity gives you three views:
 
-- aggregate unusual stories from around the world on a recurring schedule;
-- validate and normalize stories before surfacing them;
-- keep source links attached to every story;
-- keep a permanent searchable history instead of throwing old stories away;
-- show only recent stories on the home feed;
-- let users favorite stories;
-- let users dismiss stories from the current feed;
-- read stories aloud;
-- support hands-free navigation where the browser allows speech recognition;
-- make old stories discoverable by searchable relational properties such as date, location, category and tags.
+- **Home** — verified stories published in the last 7 days.
+- **Favorites** — stories you saved in this browser.
+- **History** — verified stories older than 7 days.
 
-## Interface
+Home and History never overlap. A story lives in one age bucket at a time, while Favorites is independent.
 
-The application has three primary tabs:
+You can also:
 
-- **Home** — selected stories published within the last 7 days.
-- **Favorites** — stories the user saved.
-- **History** — selected stories older than 7 days. Home and History are mutually exclusive age buckets; a story can never appear in both at once.
+- refresh the feed to discover new stories;
+- ask for stories by topic, place or date;
+- navigate with voice where browser speech recognition is available;
+- ask follow-up questions about the current story;
+- hear stories read aloud;
+- dismiss Home stories without deleting them from the archive;
+- open the original source links for every story.
 
-The main reading layout intentionally stays simple:
+## How it works
 
-1. story-title list on the left;
-2. selected story followed by source links and a compact date/verification footer in the main reading pane;
-3. small narration and navigation controls at the bottom.
+```text
+GitHub Actions ──scheduled trigger──► Render /api/research
 
-The whole reader fits one viewport. The title list and article scroll internally. Search and date fields are handled by agent instructions instead of occupying the default interface. If speech recognition is unavailable or microphone access is denied, a compact instruction box appears.
+Browser ────────────────────────────► Render / Next.js
+                                          │
+                         ┌────────────────┼────────────────┐
+                         │                │                │
+                         ▼                ▼                ▼
+                        Exa              Groq          ElevenLabs
+                   discovery/search   verification      narration
+                         │                │
+                         └────────┬───────┘
+                                  ▼
+                                Turso
+                         persistent story archive
+```
 
-On Home, a story can be dismissed with the × control or a left swipe. Favorites and dismissed-state currently persist in browser `localStorage`.
+**Render is the application backend.**  
+**Turso is the persistent database.**  
+**GitHub Actions is only the scheduler.**
 
-The seeded Demo Mode is an explicit local/QA fixture mode only. It anchors its 7-day Home/History lifecycle to the newest fixture date so interaction tests stay useful after fixture dates age. Production does not fall back to fixtures: unless `ABSURDITY_MODE=demo` is explicitly set, the reader uses persistent live storage and wall-clock time.
+The browser never receives provider secrets.
 
-## Current implementation
+## Research pipeline
 
-- Next.js / React / TypeScript
-- Tailwind CSS
-- explicit seven-story fixture mode for local/QA only; live mode never substitutes fixtures
-- Home / Favorites / History navigation
-- 7-day Home lifecycle with automatic, non-overlapping transition into History
-- permanent demo archive view
-- requested archive search by location, keywords, category and publication date
-- favorites persistence
-- dismissed-story persistence
-- swipe-to-dismiss
-- original-source links
-- event/publication date separation
-- ElevenLabs narration route with browser speech fallback
-- optional browser speech-recognition commands for hands-free navigation
-- Exa-first global discovery with RSS secondary/fallback coverage and explicit refresh cycles
-- Turso Cloud production persistence with SQLite local fallback
-- permanent story/source/research-run archive
-- constant-query archive hydration: History loads story rows, sources and research steps in three database queries instead of two extra queries per story
-- scheduled deep-research pipeline
-- source-aware clustering and deduplication
-- Groq shortlist analysis with Exa as the primary discovery/corroboration provider and Tavily as corroboration fallback
-- live archive API wired into the reader with passive focus/5-minute refresh
+A Refresh starts the production research pipeline:
 
-## Hands-free commands
+```text
+DISCOVER
+  ↓
+NORMALIZE
+  ↓
+DEDUPLICATE
+  ↓
+CLUSTER
+  ↓
+CORROBORATE
+  ↓
+EXTRACT ARTICLES
+  ↓
+VERIFY / CLASSIFY
+  ↓
+SCORE
+  ↓
+STORE
+```
 
-Where the browser exposes the Web Speech recognition API, the interface understands commands including:
+### Discovery
 
-- `next`
-- `previous`
-- `favorite`
-- `dismiss`
-- `read`
-- `stop`
-- `history`
-- `favorites`
-- `home`
-- `stop listening`
-- `find South African stories`
-- `find animal stories from the last week`
-- `find stories on 2026-10-01`
-- `find animal stories in my favorites`
+Exa is the primary discovery provider. RSS feeds provide secondary coverage and fallback discovery. Tavily can be used as an optional search fallback.
 
-Navigation searches only stored stories when requested. Explicit instructions such as `refresh the stories` or `fetch new stories` start the same ingestion cycle as the **Refresh** control; the question-mark logo and Home are navigation only. Questions and archive searches never start discovery. Exact publication-date instructions use Johannesburg calendar days; demo relative periods anchor to the newest fixture.
+### Verification
 
-The microphone uses browser speech recognition. Simple commands stay local for fast navigation; questions, conversational instructions and requested searches go to Groq through `/api/chat`. Groq receives the selected article, visible titles and the last eight conversation turns, and returns a validated reader action plus a grounded reply. Searches query only the stored archive. Conversation history stays in page memory. The chat button opens an empty, compact typed input with no command list, placeholder or explanatory text, also available automatically if microphone access is denied or recognition is unsupported.
+Groq receives the gathered evidence and produces the editorial result: whether the story is worth keeping, how credible it is, where it happened, how serious it is, and the final reader-friendly summary.
 
-Set `GROQ_API_KEY` on the Render service to enable conversation; the default model is `openai/gpt-oss-120b`. This is a Groq-hosted model and uses no OpenAI API key. Without Groq, simple commands and deterministic archive searches remain available; live answers never fall back to fixture claims. Groq currently handles reasoning and navigation, while browser recognition handles speech-to-text.
+### Article ingestion
 
-The play button or `read` reads the selected title and article through ElevenLabs when configured, falling back to browser text-to-speech when unavailable. Agent replies use the same playback pipeline. Both `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` must be set in Render and deployed; the key requires Text to Speech permission and access to the selected voice. Narration errors now show a short actionable notice before using device speech, including missing configuration, invalid voice, permissions and quota errors. Raw provider errors and secrets are never returned to the browser. The microphone pauses during speech and resumes afterward until toggled off or told `stop listening`. Use the stop control to interrupt a reply; `stop` cancels narration or a pending conversation while listening. Changing the story or view also cancels pending work. The dock shows listening, thinking, preparing and speaking states.
+Absurdity attempts to retrieve the publisher page rather than trusting a headline alone. Article fetching includes:
 
-## Live research pipeline
+- public HTTP/HTTPS URL enforcement;
+- private-address and unsafe-scheme rejection;
+- redirect revalidation;
+- DNS/socket pinning;
+- response-size limits;
+- content-type checks;
+- request deadlines;
+- readable-body extraction with Mozilla Readability.
 
-The live system now has a real persisted pipeline:
+Source pages are treated as untrusted data.
 
-`DISCOVER → NORMALIZE → DEDUPLICATE → CLUSTER → OPTIONAL SEARCH → EXTRACT ARTICLES → VERIFY/CLASSIFY → SCORE → RANK → STORE → PRESENT → NARRATE`
+## Refresh behavior
 
-Clicking **Refresh** or explicitly asking the agent to refresh calls `POST /api/research` to start the full pipeline from `lib/pipeline.ts`. The response returns immediately; the Refresh button spins while the reader polls `GET /api/research?id=…` and reloads the archive on completion. The question-mark logo and **Home** return to the current Home feed without starting research. Reloading the page resumes an active cycle without launching another. The current reader remains usable during fetching. Failed archive requests preserve already loaded stories and show a retry control; a successful empty live response clears the feed without substituting demo fixtures. Ordinary navigation and voice archive searches never initiate discovery. Completion reports how many candidates were reviewed and stories selected.
+There are three different kinds of "refresh":
 
-Before extraction, corroboration, or model analysis, the pipeline skips already-selected events by canonical source URL or matching event cluster within the research window. These skips do not consume the candidate cap and are recorded as `alreadySelected` in run telemetry. Unselected candidates remain eligible for later verification. Freshness is applied before publisher caps, and Exa candidates retain priority through the final shortlist.
+### Manual research
 
-A shared database lease prevents duplicate manual cycles and overlap with `npm run research:daily`. Manual starts have a five-minute shared cooldown. Background work uses Next.js `after()` on the Render Node server; a service restart can interrupt it, and a stale run becomes failed/retryable after 30 minutes. This is not a durable queue or continuous real-time news stream. The page fetches its archive on load and after a tracked cycle finishes, then passively refreshes the saved Turso archive every five minutes while visible and whenever the tab regains focus. Passive refresh never launches discovery or spends model calls.
+Pressing **Refresh**, or explicitly asking the agent to refresh, starts a new research cycle.
 
-When EXA_API_KEY is configured, discovery starts with freshness-bounded Exa news searches across rotating editorial lenses for local incidents, animals, public authorities, transport, science/technology, courts, culture and global regional reporting. Results are domain-diversified before clustering. UPI Odd News, Guardian World, BBC World, ABC Australia and NPR World remain secondary/fallback feeds. Exa search ranking never promotes a story by itself: candidates still pass extraction, corroboration, Groq verification/classification, scoring and persistence. Provider failures and editorial rejection can still produce a small selected briefing.
+Manual cycles share a **5-minute cooldown** so repeated clicks do not waste provider quota.
 
-The scheduled pipeline also runs through `npm run research:daily`. It stores candidates, selected stories, sources, research steps and run telemetry in relational persistence. Search is optional; Groq is used only after deterministic filtering and clustering.
+### Scheduled research
 
-## Optional providers
+GitHub Actions runs the Daily research workflow once per day at:
 
-The prototype can run without provider credentials. Optional environment variables are:
+```text
+03:17 UTC
+05:17 South Africa
+```
 
-- `GROQ_API_KEY`
-- `GROQ_MODEL`
-- `ELEVENLABS_API_KEY`
-- `ELEVENLABS_VOICE_ID`
-- `EXA_API_KEY`
-- `TAVILY_API_KEY`
+The workflow does not run a second copy of the backend. It simply calls the production Render `/api/research` endpoint and polls the returned run until it finishes.
 
-Copy `.env.example` to `.env.local` when configuring providers.
+The same workflow can be started manually from:
 
-## Local setup
+```text
+GitHub → Actions → Daily research → Run workflow
+```
 
-Requirements: Node.js 22.22.2+ (including built-in SQLite) and npm. The pinned deployment runtime is in `.node-version`.
+### Passive archive refresh
+
+While the app is open, it periodically checks Turso for newly saved stories and checks again when the tab regains focus.
+
+This does **not** start discovery and does not spend Exa or Groq quota.
+
+## Voice and narration
+
+Simple navigation commands can stay local in the browser:
+
+```text
+next
+previous
+home
+history
+favorites
+favorite
+dismiss
+read
+stop
+```
+
+Conversational requests go through `/api/chat` and are grounded in the stored story archive.
+
+Explicit requests such as:
+
+```text
+refresh the stories
+fetch new stories
+get the latest stories
+```
+
+start the same research path as the Refresh button.
+
+Narration uses ElevenLabs when configured and falls back to browser text-to-speech if needed.
+
+## Persistence
+
+Production stories live in Turso.
+
+The database stores:
+
+- stories;
+- sources;
+- extracted evidence;
+- research steps;
+- research runs;
+- the shared research lease.
+
+Render verifies Turso connectivity before starting the production app.
+
+Favorites and dismissed-state are currently stored in browser `localStorage`, so they persist on the same browser/device without requiring accounts.
+
+## Reliability
+
+Render uses two different health concepts:
+
+- `/api/live` — fast provider-independent liveness check used by Render;
+- `/api/health` — deeper database/provider diagnostics.
+
+The production start command is:
+
+```bash
+npm run db:check && npm start
+```
+
+Research runs also use a shared database lease to prevent duplicate overlapping cycles. A run that remains stuck for 30 minutes becomes stale and retryable.
+
+## Stack
+
+- Next.js 16
+- React 19
+- TypeScript
+- Turso Cloud
+- Exa
+- Groq
+- ElevenLabs
+- Mozilla Readability
+- GitHub Actions
+- Render
+
+## Local development
+
+Requirements:
+
+- Node.js 22.22.2+
+- npm
+
+Install and run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open `http://localhost:3000`.
+Then open:
+
+```text
+http://localhost:3000
+```
 
 Useful checks:
 
 ```bash
-npm run typecheck
 npm test
+npm run typecheck
 npm run build
 ```
 
-## Architecture
+## Environment
 
-- `app/page.tsx` — reader UI, favorites, dismissals and agent navigation
-- `app/api/narrate/route.ts` — narration endpoint
-- `app/api/research/route.ts` — manual research trigger and cycle status
-- `app/api/chat/route.ts` — retained grounded-agent seam
-- `lib/types.ts` — story and briefing domain model
-- `lib/demo-data.ts` — seeded demonstration corpus
-- `lib/research.ts` — RSS collection and deterministic triage
-- `lib/agent.ts` — deterministic corpus agent
-- `lib/navigation.ts` — explicit in-app navigation and archive search instructions
-- `lib/providers/intelligence.ts` — optional Groq provider
-- `lib/providers/search.ts` — optional Exa / Tavily provider
-- `lib/providers/voice.ts` — optional ElevenLabs provider
+Copy `.env.example` to `.env.local` for local configuration.
 
-## Full article ingestion
+Main provider variables:
 
-Daily research now retrieves up to three source pages per shortlisted story and uses Mozilla Readability to extract the readable article body. Scripts and remote page assets never run. Requests allow only public HTTP(S) addresses, validate and pin DNS addresses for each redirect, and enforce a 12-second deadline, four redirects and a 2 MiB HTML limit.
-
-Full extracted text is stored in `story_evidence` alongside publisher, requested/final URLs, publication/retrieval timestamps, extraction status and a SHA-256 content hash. The reader APIs return summaries and source links without shipping full evidence bodies for every archived story. Bodies over 120,000 characters are explicitly marked as clipped; model evidence has a shared 24,000-character budget with separate clipping markers. Ordinary article bodies that fit are sent in full, replacing the former 1,600-character per-source cap.
-
-Blocked, restricted, non-HTML and unreadable pages retain the available RSS/search excerpt and a recorded failure. A failed retrieval or clipped recheck cannot overwrite a previously saved complete article body. Extraction runs in scheduled research and explicit Refresh fetch cycles. Ordinary reader navigation never starts research. Groq is still required for model-written summaries; ingestion and evidence storage work without it.
-
-## Render deployment
-
-`render.yaml` defines the current Render web service.
-
-- service: `absurdity`
-- plan: free by default
-- region: Frankfurt
-- build: `npm ci && npm run build`
-- start: `npm run db:check && npm start`
-- provider-independent liveness check: `/api/live`
-- detailed database/provider diagnostics: `/api/health`
-- deployed mode: `ABSURDITY_MODE=live`; the code defaults to persistent live mode unless `ABSURDITY_MODE=demo` is explicitly set (the sample `.env.example` opts local fixture testing into demo)
-
-Provider secrets belong in the Render service environment and should never be committed.
-
-## Next build layer
-
-1. broaden RSS and geographic coverage;
-2. persisted narration cache;
-3. server-side pagination and richer history facets;
-4. authenticated cross-device favorites when user accounts are introduced;
-5. offline-friendly reading cache;
-6. deeper extraction for difficult source pages where RSS snippets are insufficient.
-
-## Persistence and scheduled research
-
-The backend now implements the production data seam discussed for Absurdity:
-
-- Turso Cloud when `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are configured.
-- Built-in SQLite fallback for local development when Turso is absent.
-- Automatic SQLite/libSQL schema initialization plus `db/migrations/001_init.sql` as the canonical schema.
-- Permanent story/source/research-run records.
-- `/api/stories` for mutually exclusive 7-day Home and older-than-7-days History scopes, plus an internal all-selected scope used to hydrate Favorites and the reader.
-- A daily pipeline that uses Exa as primary discovery when configured, adds RSS secondary/fallback candidates, calls Exa/Tavily for independent corroboration, uses Groq only on the shortlist, persists every inspected candidate for dedupe/audit, and promotes only sufficiently supported stories.
-- Provider usage and failures are recorded per research run.
-
-Run the deep pipeline manually with:
-
-```bash
-npm run research:daily
+```text
+GROQ_API_KEY
+GROQ_MODEL
+ELEVENLABS_API_KEY
+ELEVENLABS_VOICE_ID
+EXA_API_KEY
+TAVILY_API_KEY
+TURSO_DATABASE_URL
+TURSO_AUTH_TOKEN
 ```
 
-For zero-idle-cost scheduling, `.github/workflows/research.yml` runs at 03:17 UTC (05:17 Johannesburg) once per day by default. Set the repository variable `ENABLE_DAILY_RESEARCH=false` only as an emergency quota kill switch; manual dispatch remains available. The workflow calls the production Render `/api/research` endpoint and polls the returned run, so database/provider secrets remain in Render instead of being duplicated into GitHub Actions.
+Production provider/database secrets belong in Render, not in the repository.
 
-Render remains the web host and executes research with its configured Exa/Groq/Turso environment, while Turso owns the persistent archive. GitHub Actions only schedules and observes that production run, so the free Render filesystem is never treated as durable storage.
+## Deployment
 
-The Render Blueprint already sets `ABSURDITY_MODE=live`; supply the Turso and Groq secrets during deployment.
+The Render Blueprint is defined in `render.yaml`.
 
-## Reader layout and QA
+Production settings include:
 
-The current interface follows the October notebook: story titles, story text, source links directly after the article, a compact publication-date/verification footer, and small read/talk controls, all within a single viewport. The reader keeps metadata intentionally quiet while preserving the date and verification signal. See [docs/QA.md](docs/QA.md) for checks, known limits and the optional browser regression script.
+```text
+Build:  npm ci && npm run build
+Start:  npm run db:check && npm start
+Health: /api/live
+Mode:   live
+```
+
+The daily GitHub workflow only schedules production research; it does not duplicate Render's secrets or backend environment.
+
+## Repository guide
+
+```text
+app/page.tsx                    reader UI
+app/api/stories/route.ts        story archive API
+app/api/research/route.ts       research trigger/status
+app/api/chat/route.ts           grounded conversation
+app/api/narrate/route.ts        narration
+app/api/live/route.ts           liveness
+app/api/health/route.ts         diagnostics
+
+lib/pipeline.ts                 research pipeline
+lib/research.ts                 discovery
+lib/articles.ts                 safe article retrieval/extraction
+lib/repository.ts               story persistence
+lib/story-lifecycle.ts          7-day Home/History rules
+lib/providers/*                 Exa, Groq and ElevenLabs adapters
+
+docs/QA.md                      detailed reliability notes
+```
+
+## Demo mode
+
+Demo fixtures exist for local development and QA only.
+
+Production never silently falls back to fixtures. Demo mode must be explicitly enabled server-side with:
+
+```text
+ABSURDITY_MODE=demo
+```
+
+Otherwise the application runs against the persistent live archive.
+
+## Status
+
+Absurdity is feature-complete for the current submission build. The repository includes automated regression coverage, production build checks, browser smoke/reliability checks, Turso startup validation, and Render deployment health checks.
+
+For the deeper implementation and reliability record, see [docs/QA.md](docs/QA.md).
