@@ -41,6 +41,16 @@ test('recent odd-news candidates survive stale high-score headlines and the fina
 });
 
 
+test('discovery lenses deliberately hunt high-surprise absurdity across distinct categories', () => {
+  const labels = EXA_DISCOVERY_LENSES.map(lens => lens.label);
+  assert.ok(EXA_DISCOVERY_LENSES.length >= 10);
+  assert.ok(labels.some(label => label.includes('animals')));
+  assert.ok(labels.some(label => label.includes('crimes')));
+  assert.ok(labels.some(label => label.includes('bureaucracy')));
+  assert.ok(labels.some(label => label.includes('discoveries')));
+  assert.ok(EXA_DISCOVERY_LENSES.every(lens => /bizarre|strange|improbable|unexpected|mistaken|absurd|unbelievable/i.test(lens.query)));
+});
+
 test('Exa discovery is primary, freshness bounded, diverse, and RSS remains secondary', async () => {
   const now = new Date('2026-10-06T18:00:00.000Z');
   const searchCalls: any[] = [];
