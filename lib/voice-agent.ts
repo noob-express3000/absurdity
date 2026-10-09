@@ -41,11 +41,24 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   const mode = briefing.mode;
   const selected = context.storyId ? await repository.getStory(context.storyId) : null;
   const current = selected?.status === 'selected' ? selected : null;
-  const missingIds = context.visibleIds.filter(id => !briefing.stories.some(story => story.id === id) && id !== current?.id);
-  const archived = await Promise.all(missingIds.map(id => repository.getStory(id)));
-  const all = [...briefing.stories, ...(current ? [current] : []), ...archived.filter((story): story is Story => Boolean(story && story.status === 'selected'))];
-  const unique = Array.from(new Map(all.map(story => [story.id, story])).values());
-  const corpus = [ ...(current ? [current] : []), ...unique.filter(story => story.id !== current?.id) ].slice(0, 30);
+
+  // Keep the model focused on what the user can actually see. Archive search
+  // itself still runs against Turso after the model has interpreted the query,
+  // so no stored stories are discarded or made unreachable.
+  const known = new Map(briefing.stories.map(story => [story.id, story]));
+  if (current) known.set(current.id, current);
+  const missingIds = context.visibleIds.filter(id => !known.has(id));
+  const fetchedVisible = await Promise.all(missingIds.map(id => repository.getStory(id)));
+  for (const story of fetchedVisible) {
+    if (story?.status === 'selected') known.set(story.id, story);
+  }
+  const visible = context.visibleIds
+    .map(id => known.get(id))
+    .filter((story): story is Story => Boolean(story && story.status === 'selected'));
+  const corpus = [
+    ...(current ? [current] : []),
+    ...visible.filter(story => story.id !== current?.id),
+  ].slice(0, 25);
   const clock = mode === 'demo' ? Math.max(...demoBriefing.stories.map(story => Date.parse(story.publicationDate))) : Date.now();
   const provider = new GroqIntelligenceProvider();
   let plan: ConversationPlan;
