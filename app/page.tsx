@@ -188,7 +188,12 @@ export default function Home() {
         if (controller.signal.aborted) return;
         if (!run) throw new Error("Fetch cycle unavailable.");
         if (run.status === "running") { failures = 0; timer = setTimeout(check, 2500); return; }
-        if (run.status === "failed") { failures = 3; throw new Error("Fetch interrupted. Try again shortly."); }
+        if (run.status === "failed") {
+          failures = 3;
+          throw new Error(run.phase === "interrupted"
+            ? "Fetch stopped after a server restart. Try again."
+            : "Fetch interrupted. Try again shortly.");
+        }
         await reloadArchive(controller.signal);
         if (!controller.signal.aborted) {
           const text = cycleSummary(run);
