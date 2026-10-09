@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS research_runs (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS research_heartbeat (
+  run_id TEXT PRIMARY KEY REFERENCES research_runs(id) ON DELETE CASCADE,
+  updated_at INTEGER NOT NULL,
+  phase TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_stories_publication_date ON stories(publication_date);
 CREATE INDEX IF NOT EXISTS idx_stories_status_date ON stories(status, publication_date);
 CREATE INDEX IF NOT EXISTS idx_stories_country ON stories(country);
