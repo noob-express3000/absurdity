@@ -9,7 +9,7 @@ import {
 import { getSearchProvider } from "./providers/search";
 import { findSelectedStoryMatches, recordResearchRun, saveStories, saveStoryEvidence } from "./repository";
 import { ingestSource, type PageLoader } from "./articles";
-import { claimResearch, releaseResearch } from "./research-cycle";
+import { claimResearch, heartbeatResearch, releaseResearch } from "./research-cycle";
 import type { IngestedEvidence, Story, StorySource } from "./types";
 
 type CandidateGroup = {
@@ -161,7 +161,7 @@ function makeStoryId(group: CandidateGroup) {
 }
 
 type ResearchOptions = {
-  discover?: (options?: { windowHours?: number }) => Promise<DiscoveryResult>;
+  discover?: (options?: { windowHours?: number; onProgress?: (phase: string) => Promise<void> | void }) => Promise<DiscoveryResult>;
   loadArticle?: PageLoader;
   runId?: string;
 };
@@ -216,7 +216,12 @@ async function executeResearch(options: {
   });
 
   try {
-    const discovery = await (options.discover ?? runDiscovery)({ windowHours });
+    await heartbeatResearch(runId, "discovering");
+    const discovery = await (options.discover ?? runDiscovery)({
+      windowHours,
+      onProgress: phase => heartbeatResearch(runId, "discovering:" + phase),
+    });
+    await heartbeatResearch(runId, "shortlisting");
     providerUsage.discoveryProvider = discovery.providers?.includes("exa") ? "exa+rss" : "rss";
     providerUsage.exaDiscoveryQueries = discovery.exaQueries ?? 0;
     failures.push(...discovery.failures.map((failure) =>
@@ -258,7 +263,8 @@ async function executeResearch(options: {
     const evidenceByStory = new Map<string, IngestedEvidence[]>();
     const articleCache = new Map<string, Promise<IngestedEvidence>>();
 
-    for (const group of groups) {
+    for (const [groupIndex, group] of groups.entries()) {
+      await heartbeatResearch(runId, `candidate:${groupIndex + 1}/${groups.length}`);
       const primary = group.primary;
       const discoveryEvidence: CandidateEvidence[] = [primary, ...group.candidates.filter(candidate => candidate !== primary)].map((candidate) => ({
         publisher: candidate.publisher,
@@ -449,8 +455,10 @@ async function executeResearch(options: {
 
       stories.push(story);
       evidenceByStory.set(story.id, allEvidence);
+      await heartbeatResearch(runId, `candidate:${groupIndex + 1}/${groups.length}:complete`);
     }
 
+    await heartbeatResearch(runId, "saving");
     const selected = stories
       .filter((story) => story.status === "selected")
       .sort((a, b) => b.absurdityScore - a.absurdityScore);
@@ -461,6 +469,7 @@ async function executeResearch(options: {
 
     await saveStories(stories);
     for (const story of stories) await saveStoryEvidence(story.id, evidenceByStory.get(story.id) ?? []);
+    await heartbeatResearch(runId, "finalizing");
 
     const completedAt = new Date();
     await recordResearchRun({
