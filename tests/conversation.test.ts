@@ -35,6 +35,37 @@ test('Groq receives selected article, prior turns and strict schema; reasoning i
   } finally { globalThis.fetch = original; }
 });
 
+test('conversation keeps every visible story while sending rich evidence only for the current story', async () => {
+  const original = globalThis.fetch;
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    const current = demoBriefing.stories[0];
+    const other = demoBriefing.stories[1];
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input);
+      assert.deepEqual(input.stories.map((story:any) => story.id), [current.id, other.id]);
+      assert.equal(input.stories[0].detailedSummary, current.detailedSummary);
+      assert.deepEqual(input.stories[0].sources, current.sources);
+      assert.equal(input.stories[1].summary, other.summary);
+      assert.equal(input.stories[1].absurdityScore, other.absurdityScore);
+      assert.equal(input.stories[1].detailedSummary, undefined);
+      assert.equal(input.stories[1].sources, undefined);
+      return Response.json({output_text:JSON.stringify(plan)});
+    };
+    const result = await replyToVoice({
+      ...context,
+      storyId: current.id,
+      visibleIds: [other.id],
+      message: 'Compare these stories',
+    });
+    assert.equal(result.provider, 'groq');
+  } finally {
+    globalThis.fetch = original;
+    delete process.env.GROQ_API_KEY;
+  }
+});
+
 test('voice search executes the stored archive and replaces invented model result claims', async () => {
   const original = globalThis.fetch;
   try {
