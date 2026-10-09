@@ -107,6 +107,12 @@ const schemaStatements = [
     expires_at INTEGER NOT NULL,
     next_manual_at INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS research_heartbeat (
+    run_id TEXT PRIMARY KEY,
+    updated_at INTEGER NOT NULL,
+    phase TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES research_runs(id) ON DELETE CASCADE
+  )`,
   "CREATE INDEX IF NOT EXISTS idx_stories_publication_date ON stories(publication_date)",
   "CREATE INDEX IF NOT EXISTS idx_stories_status_date ON stories(status, publication_date)",
   "CREATE INDEX IF NOT EXISTS idx_stories_country ON stories(country)",
