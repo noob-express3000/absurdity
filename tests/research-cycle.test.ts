@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { before, beforeEach, test } from "node:test";
 import { getDatabase } from "../lib/database";
-import { claimResearch, getResearchCycle, releaseResearch } from "../lib/research-cycle";
+import { claimResearch, getResearchCycle, RESEARCH_HEARTBEAT_STALE_MS, releaseResearch } from "../lib/research-cycle";
 import { runDailyResearch } from "../lib/pipeline";
 import { POST, GET } from "../app/api/research/route";
 
@@ -44,13 +44,16 @@ test("failed discovery persists failure and releases the active lease", async ()
   assert.equal((await claimResearch(false)).acquired, true);
 });
 
-test("an interrupted run expires and an old worker cannot release its replacement", async () => {
+test("an interrupted heartbeat fails quickly and an old worker cannot release its replacement", async () => {
   const claim = await claimResearch();
   const db = await getDatabase();
-  await db.execute("UPDATE research_runs SET started_at = ?", [new Date(Date.now() - 31 * 60 * 1000).toISOString()]);
-  await db.execute("UPDATE research_lease SET expires_at = 0, next_manual_at = 0");
-  assert.equal((await getResearchCycle(claim.run!.id))?.status, "failed");
+  await db.execute("UPDATE research_heartbeat SET updated_at = ? WHERE run_id = ?",
+    [Date.now() - RESEARCH_HEARTBEAT_STALE_MS - 1000, claim.run!.id]);
+  const interrupted = await getResearchCycle(claim.run!.id);
+  assert.equal(interrupted?.status, "failed");
+  assert.equal(interrupted?.phase, "interrupted");
   const replacement = await claimResearch();
+  assert.equal(replacement.acquired, true);
   await releaseResearch(claim.run!.id);
   assert.equal((await claimResearch()).run?.id, replacement.run!.id);
 });
