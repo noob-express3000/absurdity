@@ -216,6 +216,7 @@ export async function runDiscovery(options: {
   now?: Date;
   windowHours?: number;
   resultsPerQuery?: number;
+  onProgress?: (phase: string) => Promise<void> | void;
 } = {}): Promise<DiscoveryResult> {
   const rssPromise = runLightweightDiscovery({ parseFeed: options.parseFeed });
   const hasExa = Boolean(options.searchWeb || process.env.EXA_API_KEY);
@@ -234,6 +235,7 @@ export async function runDiscovery(options: {
   let exaQueries = 0;
 
   for (const lens of EXA_DISCOVERY_LENSES) {
+    await options.onProgress?.("exa:" + lens.label);
     try {
       exaQueries += 1;
       const results = await exa(lens.query, resultsPerQuery, {
@@ -266,6 +268,7 @@ export async function runDiscovery(options: {
   }
 
   const rss = await rssPromise;
+  await options.onProgress?.("rss");
   const inWindow = (candidate: DiscoveredCandidate) => {
     if (!candidate.publishedAt) return true;
     const time = Date.parse(candidate.publishedAt);
