@@ -35,6 +35,31 @@ test('Groq receives selected article, prior turns and strict schema; reasoning i
   } finally { globalThis.fetch = original; }
 });
 
+test('ordinary story questions send only the selected story to Groq', async () => {
+  const original = globalThis.fetch;
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    const current = demoBriefing.stories[0];
+    const other = demoBriefing.stories[1];
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const input = JSON.parse(body.input);
+      assert.deepEqual(input.stories.map((story:any) => story.id), [current.id]);
+      return Response.json({output_text:JSON.stringify(plan)});
+    };
+    const result = await replyToVoice({
+      ...context,
+      storyId: current.id,
+      visibleIds: [other.id],
+      message: 'Why is this weird?',
+    });
+    assert.equal(result.provider, 'groq');
+  } finally {
+    globalThis.fetch = original;
+    delete process.env.GROQ_API_KEY;
+  }
+});
+
 test('conversation keeps every visible story while sending rich evidence only for the current story', async () => {
   const original = globalThis.fetch;
   try {
@@ -66,16 +91,15 @@ test('conversation keeps every visible story while sending rich evidence only fo
   }
 });
 
-test('voice search executes the stored archive and replaces invented model result claims', async () => {
+test('voice search executes the full stored archive locally without spending a Groq call', async () => {
   const original = globalThis.fetch;
   try {
     process.env.GROQ_API_KEY = 'fake';
-    globalThis.fetch = async () => Response.json({output_text:JSON.stringify({...plan,action:'search',view:'history',query:'south africa',text:'I found 999 stories.'})});
+    globalThis.fetch = async () => { throw new Error('Archive search must not call Groq'); };
     const result = await replyToVoice({...context,message:'Find South African stories'});
-    assert.equal(result.provider,'groq');
+    assert.equal(result.provider,'deterministic');
     assert.ok(result.stories!.length > 0);
     assert.ok(result.stories!.every(story => story.country === 'South Africa'));
-    assert.doesNotMatch(result.text,/999/);
     assert.match(result.text,/demo/);
   } finally { globalThis.fetch = original; delete process.env.GROQ_API_KEY; }
 });
