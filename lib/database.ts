@@ -125,28 +125,41 @@ const schemaStatements = [
 
 class TursoDatabase implements SqlDatabase {
   kind: DatabaseKind = "turso";
-  private client: ReturnType<typeof connect>;
 
-  constructor(url: string, authToken: string) {
-    this.client = connect({ url, authToken });
+  constructor(private url: string, private authToken: string) {}
+
+  private async withClient<T>(work: (client: ReturnType<typeof connect>) => Promise<T>) {
+    // Turso expires idle HTTP streams. Keep the database wrapper, but start each
+    // operation at the configured URL with a fresh stream, never an old baton.
+    const client = connect({ url: this.url, authToken: this.authToken });
+    try {
+      // This setting belongs to the stream and must precede BEGIN. query() can
+      // also write (INSERT ... RETURNING), so apply it to every operation.
+      await client.run("PRAGMA foreign_keys = ON");
+      return await work(client);
+    } finally {
+      // The driver closes best-effort; cleanup cannot replace a SQL error or
+      // turn a committed write into a failure that a caller might retry.
+      await client.close();
+    }
   }
 
   async query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []) {
-    const rows = await (await this.client.prepare(sql)).all(params as any[]);
+    const rows = await this.withClient((client) => client.all(sql, params as any[]));
     return rows as unknown as T[];
   }
 
   async execute(sql: string, params: unknown[] = []) {
-    const result = await (await this.client.prepare(sql)).run(params as any[]);
+    const result = await this.withClient((client) => client.run(sql, params as any[]));
     return Number(result.changes);
   }
 
   async batch(statements: SqlStatement[], atomic = false) {
     if (!statements.length) return;
-    await this.client.batch(
+    await this.withClient((client) => client.batch(
       statements.map(({ sql, params = [] }) => ({ sql, args: params as any[] })),
       atomic ? "immediate" : undefined,
-    );
+    ));
   }
 }
 
@@ -214,7 +227,6 @@ let initialized = false;
 async function initialize(database: SqlDatabase) {
   if (initialized) return database;
 
-  await database.execute("PRAGMA foreign_keys = ON");
   await database.batch(schemaStatements.map((sql) => ({ sql })), true);
 
   initialized = true;
