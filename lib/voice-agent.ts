@@ -29,16 +29,49 @@ function noAction(text: string): ConversationPlan {
 }
 
 export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
-  if (parseNavigation(context.message, context.scope, Date.now()).action === 'refresh') {
-    const text = 'Starting a story fetch. I will keep the reader open while it runs.';
-    return { text, action: { ...noAction(text), action: 'refresh' },
-      provider: 'deterministic', intent: 'refresh',
-      mode: context.displayMode ?? (process.env.ABSURDITY_MODE === 'live' ? 'live' : 'demo') };
-  }
-  // The client explicitly identifies fixtures it is displaying when the live archive is empty.
   const repository = context.displayMode === 'demo' ? new DemoStoryRepository() : storyRepository;
   const briefing = await repository.getCurrentBriefing();
   const mode = briefing.mode;
+  const clock = mode === 'demo' ? Math.max(...demoBriefing.stories.map(story => Date.parse(story.publicationDate))) : Date.now();
+  const local = parseNavigation(context.message, context.scope, clock);
+
+  if (local.action === 'refresh') {
+    const text = 'Starting a story fetch. I will keep the reader open while it runs.';
+    return { text, action: { ...noAction(text), action: 'refresh' },
+      provider: 'deterministic', intent: 'refresh', mode };
+  }
+
+  if (local.action === 'search') {
+    const dates = { from: local.from, before: local.before };
+    if (local.view === 'history') dates.before = clampHistoryBefore(dates.before, clock);
+    if (local.view === 'home') dates.from = clampHomeFrom(dates.from, clock);
+    const matches = await repository.searchStories(local.query, 500, dates);
+    const text = local.view === 'favorites'
+      ? 'I found matching saved stories. I will show the ones you have favorited.'
+      : matches.length ? `I found ${matches.length}${matches.length === 500 ? ' or more' : ''} ${mode === 'demo' ? 'demo ' : ''}${matches.length === 1 ? 'story' : 'stories'} in the archive. ${matches[0].title}.`
+      : 'No saved stories match that request.';
+    return {
+      text,
+      action: { ...noAction(text), action: 'search', view: local.view, query: local.query,
+        from: local.from ?? null, before: local.before ?? null, storyId: matches[0]?.id ?? null },
+      stories: matches, mode, provider: 'deterministic', intent: 'archive-search',
+    };
+  }
+
+  if (local.action === 'view') {
+    const text = `Opening ${local.view}.`;
+    return { text, action: { ...noAction(text), action: 'view', view: local.view },
+      provider: 'deterministic', intent: 'navigation', mode };
+  }
+
+  if (['next', 'previous', 'favorite', 'dismiss', 'read'].includes(local.action)) {
+    const text = 'Okay.';
+    return { text, action: { ...noAction(text), action: local.action as ConversationPlan['action'] },
+      provider: 'deterministic', intent: 'navigation', mode };
+  }
+
+  // The client explicitly identifies fixtures it is displaying when the live archive is empty.
+
   const selected = context.storyId ? await repository.getStory(context.storyId) : null;
   const current = selected?.status === 'selected' ? selected : null;
 
@@ -55,11 +88,13 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   const visible = context.visibleIds
     .map(id => known.get(id))
     .filter((story): story is Story => Boolean(story && story.status === 'selected'));
-  const corpus = [
-    ...(current ? [current] : []),
-    ...visible.filter(story => story.id !== current?.id),
-  ].slice(0, 25);
-  const clock = mode === 'demo' ? Math.max(...demoBriefing.stories.map(story => Date.parse(story.publicationDate))) : Date.now();
+
+  // Most conversational questions are about the selected story. Only explicit
+  // comparison/list language needs the wider visible set in model context.
+  const wantsVisibleSet = /\b(compare|comparison|which|these|those|all|stories|weirdest|strangest|funniest|most absurd|top|rank|ranking)\b/i.test(context.message);
+  const corpus = current
+    ? [current, ...(wantsVisibleSet ? visible.filter(story => story.id !== current.id).slice(0, 12) : [])]
+    : visible.slice(0, wantsVisibleSet ? 12 : 4);
   const provider = new GroqIntelligenceProvider();
   let plan: ConversationPlan;
   let usedProvider: VoiceReply['provider'] = 'groq';
