@@ -1,5 +1,12 @@
 # QA: notebook reader and reliability fixes
 
+## Follow-up QA — 2026-10-11 (Johannesburg)
+
+- Fixed contradictory view/timeframe requests such as `find older stories from last week` and an old exact date in Home. They now explain the incompatible range rather than returning an action rejected by the reader. Queries above the supported 200-character archive limit also receive a useful reply.
+- Explicit search and navigation no longer read and hydrate the whole briefing first. A failed unrelated briefing read cannot break those requests; grounded story conversation still retrieves its required evidence.
+- Verified **81 automated tests**, TypeScript, the production build and all four browser suites. The edge-case suite now checks the real chat route for conflicting dates and long queries, in addition to its controlled provider tests.
+- Live `118b722f`: enumeration reported 60 stories, paging displayed numbers 9–16, and selection opened story 13 correctly. Last-week search returned 60 Home results and animal search returned 14. Eight consecutive follow-up searches across Home, History, Favorites, exact dates and empty results returned HTTP 200. The earlier isolated HTTP 500 was not reproduced; its cause is unconfirmed.
+
 ## Submission QA — 2026-10-10
 
 - Fixed the enumeration/search blocker: explicit catalogue requests count the actual saved or visible results, list eight titles per page, and retain stable story numbers. `enumerate stories`, `list all stories`, `how many stories are available`, `next page`, and `open story 17` stay local and do not spend Groq quota. Search results receive the same numbered catalogue, so selection is not limited to the model's 12-story conversational context.

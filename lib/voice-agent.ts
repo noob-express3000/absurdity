@@ -31,11 +31,23 @@ function noAction(text: string): ConversationPlan {
 
 async function searchArchive(repository: StoryRepository, plan: ConversationPlan, clock: number,
   mode: VoiceReply['mode'], provider: VoiceReply['provider']): Promise<VoiceReply> {
+  if ((plan.query?.length ?? 0) > 200) {
+    const text = 'Please shorten the archive search to 200 characters or fewer.';
+    return { text, action: noAction(text), mode, provider, intent: 'archive-search' };
+  }
   const dates = { from: plan.from ?? undefined, before: plan.before ?? undefined };
   if (plan.view === 'history') dates.before = clampHistoryBefore(dates.before, clock);
   if (plan.view === 'home') dates.from = clampHomeFrom(dates.from, clock);
   if (plan.view !== 'history' && (!dates.before || Date.parse(dates.before) > clock)) {
     dates.before = new Date(clock + 1).toISOString();
+  }
+  if (dates.from && dates.before && Date.parse(dates.from) >= Date.parse(dates.before)) {
+    const text = plan.view === 'history'
+      ? 'That timeframe does not overlap History. History contains stories older than seven days.'
+      : plan.view === 'home'
+        ? 'That timeframe does not overlap Home. Home contains stories from the last seven days.'
+        : 'The start of the search timeframe must come before its end.';
+    return { text, action: noAction(text), mode, provider, intent: 'archive-search' };
   }
   const matches = await repository.searchStories(plan.query ?? '', 500, dates);
   const home = matches.filter(story => isHomePublicationDate(story.publicationDate, clock));
@@ -53,9 +65,8 @@ async function searchArchive(repository: StoryRepository, plan: ConversationPlan
 }
 
 export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
-  const repository = context.displayMode === 'demo' ? new DemoStoryRepository() : storyRepository;
-  const briefing = await repository.getCurrentBriefing();
-  const mode = briefing.mode;
+  const mode = context.displayMode ?? (process.env.ABSURDITY_MODE === 'demo' ? 'demo' : 'live');
+  const repository = mode === 'demo' ? new DemoStoryRepository() : storyRepository;
   const clock = mode === 'demo' ? Math.max(...demoBriefing.stories.map(story => Date.parse(story.publicationDate))) : Date.now();
   const local = parseNavigation(context.message, context.scope, clock);
 
@@ -83,8 +94,9 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
       provider: 'deterministic', intent: 'navigation', mode };
   }
 
-  // The client explicitly identifies fixtures it is displaying when the live archive is empty.
-
+  // Only grounded conversation needs a briefing. Explicit archive searches and
+  // navigation should not fail because an unrelated briefing read failed.
+  const briefing = await repository.getCurrentBriefing();
   const selected = context.storyId ? await repository.getStory(context.storyId) : null;
   const current = selected?.status === 'selected' ? selected : null;
 

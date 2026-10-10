@@ -32,6 +32,48 @@ test('last-week archive searches return current stories instead of an impossible
   } finally { globalThis.fetch = original; delete process.env.GROQ_API_KEY; }
 });
 
+test('explicit search and navigation survive an unavailable unrelated briefing read', async () => {
+  const originalBriefing = storyRepository.getCurrentBriefing;
+  const originalSearch = storyRepository.searchStories;
+  const originalFetch = globalThis.fetch;
+  try {
+    storyRepository.getCurrentBriefing = async () => { throw new Error('Briefing read unavailable'); };
+    storyRepository.searchStories = async () => [];
+    globalThis.fetch = async () => { throw new Error('Local instructions must not call Groq'); };
+    const live = { ...context, displayMode: 'live' as const };
+    const result = await replyToVoice({ ...live, message: 'find animal stories' });
+    assert.equal(result.action.action, 'search');
+    assert.deepEqual(result.stories, []);
+    assert.equal(result.mode, 'live');
+    for (const message of ['next', 'history', 'refresh', 'unfavorite']) {
+      const navigation = await replyToVoice({ ...live, message });
+      assert.equal(navigation.provider, 'deterministic');
+      assert.notEqual(navigation.action.action, 'none');
+    }
+  } finally {
+    storyRepository.getCurrentBriefing = originalBriefing;
+    storyRepository.searchStories = originalSearch;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('incompatible view/date requests return an explanation the reader can accept', async () => {
+  for (const message of ['find older stories from last week', 'find older stories from the past 2 days',
+    'find stories in home on 2020-01-01']) {
+    const result = await replyToVoice({ ...context, message });
+    assert.equal(result.action.action, 'none', message);
+    assert.match(result.text, /timeframe does not overlap/);
+    assert.doesNotThrow(() => validateConversationPlan(result.action, new Set()));
+  }
+});
+
+test('oversized explicit archive queries give a useful reply without returning an invalid action', async () => {
+  const result = await replyToVoice({ ...context, message: `find ${'a'.repeat(201)}` });
+  assert.match(result.text, /200 characters/);
+  assert.equal(result.action.action, 'none');
+  assert.doesNotThrow(() => validateConversationPlan(result.action, new Set()));
+});
+
 test('topic search counts the full saved archive, not the small model-visible subset', async () => {
   const originalBriefing = storyRepository.getCurrentBriefing;
   const originalSearch = storyRepository.searchStories;

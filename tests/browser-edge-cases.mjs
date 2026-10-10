@@ -171,7 +171,17 @@ try {
   const inputBox = await input.boundingBox();
   assert.ok(inputBox.y >= 0 && inputBox.y + inputBox.height <= 640);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight), true);
+
+  // Exercise real chat-route replies: a contradictory date range and a long
+  // explicit query must explain the request without failing client validation.
+  await page.unroute('**/api/chat');
+  await say('find older stories from last week');
+  await page.locator('.agent-prompt p').getByText('That timeframe does not overlap History.', { exact: false }).waitFor();
+  assert.equal(await page.locator('article h2').innerText(), old.title);
+  await say(`find ${'a'.repeat(201)}`);
+  await page.locator('.agent-prompt p').getByText('200 characters or fewer.', { exact: false }).waitFor();
+  await say('stop');
   assert.equal(refreshes, 0, 'search, enumeration and navigation must not trigger discovery');
   assert.deepEqual(errors, []);
-  console.log('PASS 40-story enumeration/counts, paging, stable numbered search selection beyond 12, scroll reset, focus, favorite-removal cancellation, aborted narration, one fallback per audio error, thinking echo suppression, selected History preservation, malformed rows, bounded mobile replies, zero discovery/model calls for catalogue commands');
+  console.log('PASS 40-story enumeration/counts, paging, stable numbered search selection beyond 12, scroll reset, focus, favorite-removal cancellation, aborted narration, one fallback per audio error, thinking echo suppression, selected History preservation, malformed rows, bounded mobile replies, real-route conflicting date and query-length replies, zero discovery/model calls for catalogue commands');
 } finally { await browser.close(); }
