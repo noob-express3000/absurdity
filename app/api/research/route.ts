@@ -17,7 +17,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
-  if ((origin && new URL(origin).host !== (request.headers.get("host") || new URL(request.url).host)) || request.headers.get("sec-fetch-site") === "cross-site") {
+  let sameOrigin = false;
+  try { sameOrigin = !origin || new URL(origin).host === (request.headers.get("host") || new URL(request.url).host); }
+  catch { /* Invalid and opaque origins are not app requests. */ }
+  if (!sameOrigin || request.headers.get("sec-fetch-site") === "cross-site") {
     return NextResponse.json({ error: "Use the app to fetch stories." }, { status: 403 });
   }
   try {

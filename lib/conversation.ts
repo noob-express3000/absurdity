@@ -42,6 +42,5 @@ export function validateConversationPlan(value: unknown, allowedIds: Set<string>
     if (date !== null && (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(date) || !Number.isFinite(Date.parse(date)))) throw new Error('Invalid date bounds.');
   }
   if (plan.from && plan.before && Date.parse(plan.from) >= Date.parse(plan.before)) throw new Error('Inverted date bounds.');
-  if (plan.action === 'search' && plan.view !== 'history' && plan.view !== 'favorites') throw new Error('Search must use a stored archive view.');
   return { ...plan, text: plan.text.trim(), from: plan.from ? new Date(plan.from).toISOString() : null, before: plan.before ? new Date(plan.before).toISOString() : null };
 }

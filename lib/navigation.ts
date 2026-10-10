@@ -1,10 +1,10 @@
-import { HOME_WINDOW_MS } from "./story-lifecycle";
+import { homeCutoffMs, HOME_WINDOW_MS } from "./story-lifecycle";
 
 export type StoryView = "home" | "favorites" | "history";
 export type NavigationRequest =
-  | { action: "next" | "previous" | "favorite" | "dismiss" | "read" | "stop" | "stop-listening" | "refresh" }
+  | { action: "next" | "previous" | "favorite" | "unfavorite" | "dismiss" | "read" | "stop" | "stop-listening" | "refresh" }
   | { action: "view"; view: StoryView }
-  | { action: "search"; query: string; view: StoryView; from?: string; before?: string }
+  | { action: "search"; query: string; view: StoryView | null; from?: string; before?: string }
   | { action: "unknown" };
 
 // Archive navigation stays local; only an explicit refresh request launches research.
@@ -20,14 +20,21 @@ export function parseNavigation(raw: string, currentView: StoryView, now: number
   if (/^(?:next|next story)$/.test(command)) return { action: "next" };
   if (/^(?:previous|previous story|back|go back)$/.test(command)) return { action: "previous" };
   if (/^(?:favorite|favourite|save)(?: this(?: story)?)?$/.test(command)) return { action: "favorite" };
+  if (/^(?:unfavorite|unfavourite|unsave)(?: this(?: story)?)?$/.test(command) ||
+      /^(?:remove|delete)(?: this(?: story)?)? from (?:my )?(?:favorites|favourites)$/.test(command)) return { action: "unfavorite" };
   if (/^(?:dismiss|skip)(?: this(?: story)?)?$/.test(command)) return { action: "dismiss" };
   if (/^(?:read|speak|read aloud|read this(?: story)?)$/.test(command)) return { action: "read" };
   if (command === "stop listening") return { action: "stop-listening" };
   if (/^(?:stop|stop reading)$/.test(command)) return { action: "stop" };
-  if (!/^(?:find|search|show|look for)\b/.test(command)) return { action: "unknown" };
+  const searchCommand = command.replace(/^(?:list|enumerate)\b/, "find")
+    .replace(/^(?:what|which|how many) (.+?) stories (?:do (?:you|we) have|are (?:there|available))(.*)$/, "find $1 stories $2")
+    .replace(/^(?:what|which) (?:stories|news) (?:do (?:you|we) have|are (?:there|available))(?: about| on)?\s*/, "find stories about ");
+  if (!/^(?:find|search|show|look for)\b/.test(searchCommand)) return { action: "unknown" };
 
-  let query = command.replace(/^(?:find|search|show|look for)\s*/, "");
-  const view = /\b(?:favorites|favourites)\b/.test(query) ? "favorites" : "history";
+  let query = searchCommand.replace(/^(?:find|search|show|look for)\s*/, "");
+  const favorites = /\b(?:favorites|favourites)\b/.test(query);
+  const explicitHistory = /\b(?:history|archive|older)\b/.test(query);
+  const explicitHome = /\b(?:home|new|recent|current|latest)\b/.test(query);
   let from: string | undefined;
   let before: string | undefined;
   const exactDate = query.match(/\b(?:on|from)\s+(\d{4}-\d{2}-\d{2})\b/);
@@ -51,11 +58,15 @@ export function parseNavigation(raw: string, currentView: StoryView, now: number
     before = new Date(now - HOME_WINDOW_MS).toISOString();
     query = query.replace(/\bolder\b/g, " ");
   }
+  // A recent date request must not be clamped to the mutually exclusive older
+  // History bucket. Explicit view requests still take precedence.
+  const view: StoryView | null = favorites ? "favorites" : explicitHistory ? "history"
+    : explicitHome || (from && Date.parse(from) >= homeCutoffMs(now)) ? "home" : null;
   query = query.replace(/\bsouth african\b/g, "south africa")
     .replace(/\banimals\b/g, "animal")
-    .replace(/\b(?:the|my|me|for|in|about|from|on|of|stories|story|news|history|archive|favorites|favourites)\b/g, " ")
+    .replace(/\b(?:the|my|me|for|in|about|from|on|of|stories|story|news|history|archive|favorites|favourites|home|new|recent|current|latest)\b/g, " ")
     .replace(/\s+/g, " ").trim();
   // "Search" alone is not a request to start discovering new stories.
-  if (!query && !from && !before) return { action: "view", view: currentView };
+  if (!query && !from && !before) return { action: "view", view: explicitHome ? "home" : explicitHistory ? "history" : currentView };
   return { action: "search", query, view, from, before };
 }

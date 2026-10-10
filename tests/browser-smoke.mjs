@@ -48,7 +48,9 @@ await search('find no-results-ever');
 await page.getByText('No archived stories match this search and timeframe.').first().waitFor();
 assert.match(await page.locator('aside').innerText(),/No archived stories/);
 await search('show older animal stories');
-await page.getByText('No archived stories match this search and timeframe.').first().waitFor();
+await page.getByRole('heading',{name:/^Escaped emu/}).waitFor();
+assert.equal(await page.locator('.story-row').count(), 2);
+assert.equal(await page.locator('nav button[aria-current]').innerText(),'History');
 await search('find animal stories in my favorites');
 assert.equal(await storyTitle(),third);
 // Conversational turns carry context, speak replies, suppress echo, and resume listening.

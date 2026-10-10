@@ -111,19 +111,19 @@ function conversationStory(story: Story, currentStoryId?: string) {
 
 export class GroqIntelligenceProvider implements IntelligenceProvider {
   constructor(
-    private apiKey = process.env.GROQ_API_KEY,
-    private model = process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+    private apiKey = process.env.GROQ_API_KEY?.trim(),
+    private model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b",
   ) {}
 
   available() {
     return Boolean(this.apiKey);
   }
 
-  private async respond(input: string, maxOutputTokens: number, structuredInstructions?: string) {
+  private async respond(input: string, maxOutputTokens: number, structuredInstructions?: string, signal?: AbortSignal) {
     if (!this.apiKey) throw new Error("Groq is not configured.");
 
     const response = await fetch("https://api.groq.com/openai/v1/responses", {
-      signal: AbortSignal.timeout(30000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -153,7 +153,7 @@ export class GroqIntelligenceProvider implements IntelligenceProvider {
 
   async planConversation(message: string, stories: Story[], context: {
     storyId?: string; scope: string; visibleIds: string[]; history: ConversationTurn[]; now: string; mode: string;
-  }) {
+  }, signal?: AbortSignal) {
     const raw = await this.respond(JSON.stringify({
       context,
       stories: stories.map(story => conversationStory(story, context.storyId)),
@@ -163,8 +163,8 @@ Answer factual questions ONLY from supplied stories and sources. Say when eviden
 Use previous turns to understand follow-ups, but take actions ONLY when the latest user request asks for them. Default action none for explanation, greeting or a question about the current story.
 Supported actions: none, view, next, previous, select, favorite, unfavorite, dismiss, read, search. Select requires an exact supplied story ID. Favorite/unfavorite/dismiss act on the current story unless the user explicitly identifies another supplied story. Read reads the selected story. Set read=true if the user asks to read after selecting, navigating or searching.
 Explicit refresh requests are handled separately by the app. Never claim that stories were fetched, updated or refreshed, and never turn a refresh instruction into an archive search.
-Search ONLY the stored archive when requested, never the web or new story discovery. The backend executes the search and replaces the search reply with actual results. Use view history or favorites. Query is concise keywords; ALL words must match story title/summary/location/category/tags. Normalize South African to South Africa and animals to animal. Never put instructions or dates into query. Omit geographic or category constraints unless requested.
-Use context.now for relative publication periods. Use Africa/Johannesburg (+02:00) for exact publication calendar days; from is inclusive and before exclusive, both ISO timestamps. Older stories means before context.now minus ${HOME_WINDOW_DAYS} days. Leave unused query, dates, view and storyId null. Keep replies under 90 words. Do not claim an action has happened unless you return the corresponding supported action.`);
+Search ONLY the stored archive when requested, never the web or new story discovery. The backend executes the search and replaces the search reply with actual results. Use view null to search all saved stories unless the user requests a specific view: home for stories published within the last ${HOME_WINDOW_DAYS} days, history for older stories, or favorites when requested. Your supplied stories are a partial context, never the whole archive. Never infer archive counts or claim other stories do not exist from that partial context. Query is concise keywords; ALL words must match story title/summary/location/category/tags. Normalize South African to South Africa and animals to animal. Never put instructions or dates into query. Omit geographic or category constraints unless requested.
+Use context.now for relative publication periods. Use Africa/Johannesburg (+02:00) for exact publication calendar days; from is inclusive and before exclusive, both ISO timestamps. Older stories means before context.now minus ${HOME_WINDOW_DAYS} days. Leave unused query, dates, view and storyId null. Keep replies under 90 words. Do not claim an action has happened unless you return the corresponding supported action.`, signal);
     return validateConversationPlan(extractJson(raw), new Set(stories.map(story => story.id)));
   }
 

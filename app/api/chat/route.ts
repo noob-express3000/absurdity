@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         ? body.history.filter((turn: any) => ["user", "assistant"].includes(turn?.role) && typeof turn?.content === "string")
           .slice(-8).map((turn: ConversationTurn) => ({ role: turn.role, content: turn.content.slice(0, 2000) })) : [];
       const displayMode = process.env.ABSURDITY_MODE === "demo" ? "demo" : "live";
-      return NextResponse.json(await replyToVoice({ message, storyId, scope, visibleIds, history, displayMode }));
+      return NextResponse.json(await replyToVoice({ message, storyId, scope, visibleIds, history, displayMode, signal: request.signal }));
     }
 
     const briefing = await storyRepository.getCurrentBriefing();

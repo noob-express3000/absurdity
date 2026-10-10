@@ -81,7 +81,7 @@ await page.getByRole('textbox',{name:'Ask Absurdity to navigate'}).fill('Refresh
 await page.getByRole('button',{name:'Send instruction',exact:true}).click();
 assert.equal(await icon.getAttribute('aria-busy'), 'true');
 await page.getByRole('heading',{name:'Fresh article from the fetch cycle',exact:true}).waitFor();
-assert.equal(await page.locator('nav button[aria-current]').innerText(),'History');
+assert.equal(await page.locator('nav button[aria-current]').innerText(),'Home', 'an empty History view should recover to the available Home feed');
 await page.locator('.agent-prompt').getByText('Reviewed 3 candidates; selected 1 story.',{exact:true}).waitFor();
 assert.equal(posts, 4);
 assert.equal(chats, 0, 'explicit refresh must not search the archive or ask Groq');

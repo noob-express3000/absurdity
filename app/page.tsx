@@ -5,10 +5,12 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { demoBriefing } from "@/lib/demo-data";
 import type { Story } from "@/lib/types";
 import { parseNavigation } from "@/lib/navigation";
-import type { ConversationTurn } from "@/lib/conversation";
+import { validateConversationPlan, type ConversationTurn } from "@/lib/conversation";
 import type { ResearchCycle } from "@/lib/research-cycle";
 import type { VoiceReply } from "@/lib/voice-agent";
 import { HOME_WINDOW_DAYS, isHistoryPublicationDate, isHomePublicationDate } from "@/lib/story-lifecycle";
+import { isReaderStory, isSourceUrl, readerRequest } from "@/lib/reader-request";
+import { CATALOGUE_PAGE_SIZE, catalogueText, parseCatalogueCommand } from "@/lib/catalogue";
 
 type Tab = "home" | "favorites" | "history";
 type VoiceState = "idle" | "loading" | "playing";
@@ -82,9 +84,16 @@ export default function Home() {
   const keepListeningRef = useRef(false);
   const commandHandlerRef = useRef<(command: string) => void>(() => {});
   const narrationRequestRef = useRef(0);
+  const narrationControllerRef = useRef<AbortController | null>(null);
+  const narrationStoryRef = useRef<string | null>(null);
+  const agentStoryRef = useRef<string | null>(null);
+  const readerBodyRef = useRef<HTMLDivElement | null>(null);
+  const storyListRef = useRef<HTMLDivElement | null>(null);
+  const agentInputRef = useRef<HTMLInputElement | null>(null);
   const agentRequestRef = useRef(0);
   const agentControllerRef = useRef<AbortController | null>(null);
   const conversationRef = useRef<ConversationTurn[]>([]);
+  const catalogueRef = useRef<{ stories: Story[]; label: string; page: number } | null>(null);
   const speechActiveRef = useRef(false);
   const recognitionStateRef = useRef<"idle" | "running" | "stopping">("idle");
   const audioUrlRef = useRef<string | null>(null);
@@ -99,13 +108,14 @@ export default function Home() {
   const reloadArchive = useCallback(async (signal?: AbortSignal, surfaceErrors = true) => {
     const requestId = ++archiveRequestRef.current;
     try {
-      const response = await fetch("/api/stories?scope=all&limit=500", {
-        cache: "no-store", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
-      });
-      if (!response.ok) throw new Error("Could not refresh stories.");
-      const payload = await response.json();
+      const payload = await readerRequest("/api/stories?scope=all&limit=500", {
+        cache: "no-store", signal,
+      }, async response => {
+        if (!response.ok) throw new Error("Could not refresh stories.");
+        return response.json();
+      }, 20000);
       if (signal?.aborted || requestId !== archiveRequestRef.current) return;
-      if (!["live", "demo"].includes(payload?.mode) || !Array.isArray(payload?.stories)) {
+      if (!["live", "demo"].includes(payload?.mode) || !Array.isArray(payload?.stories) || !payload.stories.every(isReaderStory)) {
         throw new Error("Invalid archive response.");
       }
       archiveLoadedRef.current = true;
@@ -115,8 +125,6 @@ export default function Home() {
         setDataMode("live");
         if (payload.stories.length) {
           setRemoteStories(payload.stories as Story[]);
-          setSelectedId(current =>
-            payload.stories.some((story: Story) => story.id === current) ? current : payload.stories[0].id);
         } else {
           // An empty persistent archive is genuinely empty. Never replace it with
           // seeded fixtures in live mode.
@@ -144,8 +152,8 @@ export default function Home() {
     const controller = new AbortController();
     void reloadArchive(controller.signal).catch(() => {});
     // Resume an existing cycle after a reload; reading status never starts research.
-    void fetch("/api/research", { cache: "no-store", signal: controller.signal })
-      .then(response => response.ok ? response.json() : null)
+    void readerRequest("/api/research", { cache: "no-store", signal: controller.signal },
+      response => response.ok ? response.json() : Promise.resolve(null), 15000)
       .then(payload => {
         if (!controller.signal.aborted && payload?.run?.status === "running") {
           fetchBusyRef.current = true;
@@ -181,12 +189,13 @@ export default function Home() {
     let failures = 0;
     async function check() {
       try {
-        const response = await fetch(`/api/research?id=${encodeURIComponent(cycleId!)}`,
-          { cache: "no-store", signal: controller.signal });
-        if (!response.ok) throw new Error("Could not check the fetch cycle.");
-        const { run }: { run: ResearchCycle | null } = await response.json();
+        const { run }: { run: ResearchCycle | null } = await readerRequest(`/api/research?id=${encodeURIComponent(cycleId!)}`,
+          { cache: "no-store", signal: controller.signal }, async response => {
+            if (!response.ok) throw new Error("Could not check the fetch cycle.");
+            return response.json();
+          }, 15000);
         if (controller.signal.aborted) return;
-        if (!run) throw new Error("Fetch cycle unavailable.");
+        if (!run || !["running", "complete", "failed"].includes(run.status)) throw new Error("Fetch cycle unavailable.");
         if (run.status === "running") { failures = 0; timer = setTimeout(check, 2500); return; }
         if (run.status === "failed") {
           failures = 3;
@@ -245,7 +254,7 @@ export default function Home() {
     // Recover from an empty search without clearing a story that is being read.
     if (!visibleStories.length) {
       setSearchResults(null);
-      if (!baseStories.length && stories.length) setTab("history");
+      if (!baseStories.length && stories.length) setTab(homeStories.length ? "home" : "history");
     }
     fetchBusyRef.current = true;
     setFetching(true);
@@ -253,9 +262,13 @@ export default function Home() {
     const controller = new AbortController();
     fetchControllerRef.current = controller;
     try {
-      const response = await fetch("/api/research", { method: "POST", signal: controller.signal });
-      const payload = await response.json();
-      if (!response.ok || !payload.run) throw new Error(payload.error || "Could not start a fetch cycle.");
+      const payload = await readerRequest("/api/research", { method: "POST", signal: controller.signal }, async response => {
+        const payload = await response.json();
+        if (!response.ok || !payload?.run || !["running", "complete", "failed"].includes(payload.run.status)) {
+          throw new Error(payload?.error || "Could not start a fetch cycle.");
+        }
+        return payload;
+      }, 20000);
       if (payload.run.status === "running") {
         setCycleId(payload.run.id);
         reportFetch(payload.started ? "Fetching stories." : "Already fetching stories.", spoken);
@@ -288,6 +301,7 @@ export default function Home() {
       recognitionRef.current?.stop?.();
       audioRef.current?.pause();
       narrationRequestRef.current += 1;
+      narrationControllerRef.current?.abort();
       agentRequestRef.current += 1;
       agentControllerRef.current?.abort();
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
@@ -322,12 +336,26 @@ export default function Home() {
     : baseStories;
 
   const selected = visibleStories.find((story) => story.id === selectedId) ?? visibleStories[0] ?? stories[0] ?? demoBriefing.stories[0];
+  const displayedStoryId = visibleStories.length ? selected.id : null;
 
   useEffect(() => {
     if (visibleStories.length && !visibleStories.some((story) => story.id === selectedId)) {
       setSelectedId(visibleStories[0].id);
     }
   }, [selectedId, visibleStories]);
+
+  useEffect(() => {
+    readerBodyRef.current?.scrollTo({ top: 0 });
+    storyListRef.current?.querySelector(`[aria-pressed="true"]`)?.scrollIntoView({ block: "nearest" });
+    // Removing a favorite or updating the archive can change the article without
+    // a navigation click. Do not leave its old narration or answer running.
+    if ((narrationStoryRef.current && narrationStoryRef.current !== displayedStoryId) ||
+        (agentStoryRef.current && agentStoryRef.current !== displayedStoryId)) stopNarration();
+  }, [displayedStoryId]);
+
+  useEffect(() => {
+    if (showAgentPrompt) agentInputRef.current?.focus();
+  }, [showAgentPrompt]);
 
   function resumeListening() {
     if (!keepListeningRef.current || speechActiveRef.current || recognitionStateRef.current !== "idle") return;
@@ -345,17 +373,26 @@ export default function Home() {
   function finishSpeech(requestId: number) {
     if (requestId !== narrationRequestRef.current) return;
     speechActiveRef.current = false;
+    narrationStoryRef.current = null;
     setVoiceState("idle");
     resumeListening();
   }
 
   function stopNarration() {
     narrationRequestRef.current += 1;
+    narrationControllerRef.current?.abort();
+    narrationControllerRef.current = null;
+    narrationStoryRef.current = null;
     agentRequestRef.current += 1;
     agentControllerRef.current?.abort();
     agentControllerRef.current = null;
+    agentStoryRef.current = null;
     setAgentBusy(false);
-    audioRef.current?.pause();
+    if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.onerror = null;
+      audioRef.current.pause();
+    }
     audioRef.current = null;
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     audioUrlRef.current = null;
@@ -366,7 +403,8 @@ export default function Home() {
   }
 
   function browserSpeak(text: string, requestId: number) {
-    if (!("speechSynthesis" in window)) {
+    if (!window.speechSynthesis || typeof window.SpeechSynthesisUtterance !== "function") {
+      setNarrationHint("Audio playback is unavailable in this browser.");
       finishSpeech(requestId);
       return;
     }
@@ -378,9 +416,12 @@ export default function Home() {
     window.speechSynthesis.speak(utterance);
   }
 
-  async function speakText(text: string) {
+  async function speakText(text: string, storyId?: string) {
     stopNarration();
     const requestId = ++narrationRequestRef.current;
+    narrationStoryRef.current = storyId ?? null;
+    const controller = new AbortController();
+    narrationControllerRef.current = controller;
     speechActiveRef.current = true;
     if (recognitionStateRef.current === "running") {
       recognitionStateRef.current = "stopping";
@@ -388,20 +429,38 @@ export default function Home() {
     }
     setVoiceState("loading");
     setNarrationHint("");
+    let fallbackStarted = false;
+    const fallback = (hint: string) => {
+      if (requestId !== narrationRequestRef.current || fallbackStarted) return;
+      fallbackStarted = true;
+      if (audioRef.current) {
+        audioRef.current.onended = null;
+        audioRef.current.onerror = null;
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+      setNarrationHint(`${hint} Using device voice.`);
+      browserSpeak(text, requestId);
+    };
     try {
-      const response = await fetch("/api/narrate", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      const result = await readerRequest("/api/narrate", {
+        method: "POST", signal: controller.signal,
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      }, async response => {
+        if (!response.ok) {
+          const failure = await response.json().catch(() => null);
+          return { error: failure?.error || "ElevenLabs narration is unavailable." };
+        }
+        const blob = await response.blob();
+        return !response.headers.get("content-type")?.startsWith("audio/") || !blob.size
+          ? { error: "ElevenLabs returned no playable audio." } : { blob };
       });
       if (requestId !== narrationRequestRef.current) return;
-      if (!response.ok) {
-        const failure = await response.json().catch(() => null);
-        if (requestId !== narrationRequestRef.current) return;
-        setNarrationHint(`${failure?.error || "ElevenLabs narration is unavailable."} Using device voice.`);
-        return browserSpeak(text, requestId);
-      }
-      const blob = await response.blob();
-      if (requestId !== narrationRequestRef.current) return;
-      const url = URL.createObjectURL(blob);
+      narrationControllerRef.current = null;
+      if ("error" in result) return fallback(result.error);
+      const url = URL.createObjectURL(result.blob);
       audioUrlRef.current = url;
       const audio = new Audio(url);
       audioRef.current = audio;
@@ -412,25 +471,20 @@ export default function Home() {
       audio.onended = () => { release(); finishSpeech(requestId); };
       audio.onerror = () => {
         release();
-        if (requestId === narrationRequestRef.current) {
-          setNarrationHint("Could not play ElevenLabs audio. Using device voice.");
-          browserSpeak(text, requestId);
-        }
+        fallback("Could not play ElevenLabs audio.");
       };
       setVoiceState("playing");
       await audio.play();
     } catch {
       if (requestId !== narrationRequestRef.current) return;
-      setNarrationHint("Narration connection or audio playback failed. Using device voice.");
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-      if (requestId === narrationRequestRef.current) browserSpeak(text, requestId);
+      narrationControllerRef.current = null;
+      fallback("Narration connection or audio playback failed.");
     }
   }
 
   function narrate() {
     if (voiceState !== "idle" || agentBusy) return stopNarration();
-    if (visibleStories.length) void speakText(`${selected.title}. ${selected.detailedSummary}`);
+    if (visibleStories.length) void speakText(`${selected.title}. ${selected.detailedSummary}`, selected.id);
   }
 
   function toggleFavorite(id: string) {
@@ -486,21 +540,34 @@ export default function Home() {
     const requestId = ++agentRequestRef.current;
     const controller = new AbortController();
     agentControllerRef.current = controller;
+    agentStoryRef.current = displayedStoryId;
+    speechActiveRef.current = true;
+    if (recognitionStateRef.current === "running") {
+      recognitionStateRef.current = "stopping";
+      recognitionRef.current?.stop();
+    }
     setAgentBusy(true);
     setAgentReply("");
     setVoiceHint("Thinking…");
     try {
-      const response = await fetch("/api/chat", {
+      const reply: VoiceReply = await readerRequest("/api/chat", {
         method: "POST", signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ voice: true, message, storyId: visibleStories.length ? selected.id : undefined,
           scope: tab, visibleIds: visibleStories.slice(0, 24).map(story => story.id),
           history: conversationRef.current }),
+      }, async response => {
+        if (!response.ok) throw new Error("Conversation unavailable");
+        return response.json();
       });
-      if (!response.ok) throw new Error("Conversation unavailable");
-      const reply: VoiceReply = await response.json();
       if (requestId !== agentRequestRef.current) return;
+      if (!reply || typeof reply.text !== "string" ||
+          (reply.stories !== undefined && (!Array.isArray(reply.stories) || !reply.stories.every(isReaderStory)))) {
+        throw new Error("Invalid conversation response");
+      }
+      validateConversationPlan(reply.action, new Set([...stories, ...(reply.stories ?? [])].map(story => story.id)));
       agentControllerRef.current = null;
+      agentStoryRef.current = null;
       const plan = reply.action;
       let text = reply.text;
       let target = plan.storyId ? stories.find(story => story.id === plan.storyId) : visibleStories.length ? selected : undefined;
@@ -542,13 +609,16 @@ export default function Home() {
         case "search": {
           const matches = (reply.stories ?? []).filter(story => plan.view !== "favorites" || favorites.includes(story.id));
           if (reply.mode === "live") setRemoteStories(current => Array.from(new Map([...(current ?? []), ...matches].map(story => [story.id, story])).values()));
-          setTab(plan.view === "favorites" ? "favorites" : "history");
+          setTab(plan.view ?? "history");
           setSearchResults(matches);
-          target = matches[0];
+          const displayed = plan.view === "home"
+            ? matches.filter(story => isHomePublicationDate(story.publicationDate, anchorTime) && !dismissed.includes(story.id))
+            : plan.view === "history" ? matches.filter(story => isHistoryPublicationDate(story.publicationDate, anchorTime)) : matches;
+          target = displayed[0];
           if (target) setSelectedId(target.id);
-          if (plan.view === "favorites") text = matches.length
-            ? `I found ${matches.length}${matches.length === 500 ? " or more" : ""} matching ${reply.mode === "demo" ? "demo " : ""}${matches.length === 1 ? "favorite" : "favorites"}. ${target.title}.`
-            : "No favorites match that request.";
+          const label = `in these ${reply.mode === "demo" ? "demo " : ""}${plan.view === "favorites" ? "favorite " : ""}search results`;
+          catalogueRef.current = { stories: displayed, label, page: 0 };
+          text = `${plan.view === "favorites" ? "" : reply.text + "\n"}${catalogueText(displayed, label)}`;
           break;
         }
       }
@@ -556,10 +626,12 @@ export default function Home() {
       setAgentBusy(false);
       setAgentReply(text);
       setVoiceHint(text);
-      void speakText((plan.read || plan.action === "read") && target ? `${text} ${target.title}. ${target.detailedSummary}` : text);
+      void speakText((plan.read || plan.action === "read") && target ? `${text} ${target.title}. ${target.detailedSummary}` : text,
+        (plan.read || plan.action === "read") ? target?.id : undefined);
     } catch {
       if (requestId !== agentRequestRef.current) return;
       agentControllerRef.current = null;
+      agentStoryRef.current = null;
       setAgentBusy(false);
       const text = "I couldn't connect just now. Try again, or use next, read, favorites, or history.";
       setAgentReply(text);
@@ -569,6 +641,55 @@ export default function Home() {
   }
 
   function handleVoiceCommand(raw: string) {
+    const catalogue = parseCatalogueCommand(raw);
+    if (catalogue) {
+      stopNarration();
+      if (dataMode === "loading") {
+        setAgentReply("The archive is still loading. Try the list again once it opens.");
+        return;
+      }
+      let text: string;
+      if (catalogue.action === "select") {
+        const target = (catalogueRef.current?.stories ?? visibleStories)[catalogue.index - 1];
+        if (!target) {
+          text = `There isn't a story numbered ${catalogue.index} in this list.`;
+        } else {
+          if (!visibleStories.some(story => story.id === target.id)) {
+            if (isHomePublicationDate(target.publicationDate, anchorTime)) {
+              setDismissed(current => current.filter(id => id !== target.id));
+              changeTab("home");
+            } else changeTab("history");
+          }
+          setSelectedId(target.id);
+          text = `Opening story ${catalogue.index}: ${target.title}.`;
+          if (catalogue.read) {
+            setAgentReply(text);
+            void speakText(`${target.title}. ${target.detailedSummary}`, target.id);
+            return;
+          }
+        }
+      } else {
+        const previous = catalogueRef.current;
+        const paging = typeof catalogue.page === "string" && previous;
+        const source = paging ? previous.stories
+          : catalogue.scope === "all" ? stories.filter(story => isHomePublicationDate(story.publicationDate, anchorTime) || isHistoryPublicationDate(story.publicationDate, anchorTime))
+          : catalogue.scope === "home" ? homeStories : catalogue.scope === "history" ? historyStories
+          : catalogue.scope === "favorites" ? favoriteStories : visibleStories;
+        const label = paging ? previous.label : catalogue.scope === "all" ? "in the saved archive"
+          : catalogue.scope === "current" && searchResults ? "in these search results"
+          : `in ${catalogue.scope === "current" ? tab : catalogue.scope}`;
+        const lastPage = Math.max(0, Math.ceil(source.length / CATALOGUE_PAGE_SIZE) - 1);
+        const page = Math.min(lastPage, Math.max(0, paging
+          ? previous.page + (catalogue.page === "next" ? 1 : -1) : 0));
+        catalogueRef.current = { stories: [...source], label, page };
+        text = catalogueText(source, label, page, catalogue.countOnly);
+      }
+      setAgentReply(text);
+      setVoiceHint(text);
+      conversationRef.current = [...conversationRef.current, { role: "user", content: raw }, { role: "assistant", content: text }].slice(-8) as ConversationTurn[];
+      void speakText(text);
+      return;
+    }
     const instruction = parseNavigation(raw, tab, usingLive ? Date.now() : anchorTime);
     setVoiceHint(`Heard: “${raw}”`);
     switch (instruction.action) {
@@ -577,6 +698,7 @@ export default function Home() {
       case "next": return selectAdjacent(1);
       case "previous": return selectAdjacent(-1);
       case "favorite": if (visibleStories.length) setFavorites(current => current.includes(selected.id) ? current : [...current, selected.id]); return;
+      case "unfavorite": if (visibleStories.length) setFavorites(current => current.filter(id => id !== selected.id)); return;
       case "dismiss": if (visibleStories.length) dismissStory(selected.id); return;
       case "read": if (visibleStories.length) void narrate(); return;
       case "stop-listening": return stopHandsFree();
@@ -652,6 +774,7 @@ export default function Home() {
 
   const emptyMessage =
     dataMode === "loading" ? "Loading stories…"
+    : searchResults ? "No archived stories match this search and timeframe."
     : tab === "home"
       ? dismissed.length
         ? "You cleared the current feed. Restore dismissed stories to review it again."
@@ -716,7 +839,7 @@ export default function Home() {
         ) : (
         <>
         <aside className="story-sidebar" aria-label="Story titles">
-          <div className="story-list abs-scrollbar">
+          <div ref={storyListRef} className="story-list abs-scrollbar">
             {visibleStories.length ? visibleStories.map((story) => (
               <div key={story.id} className={`story-row ${selected.id === story.id ? "is-selected" : ""}`}
                 onPointerDown={(event) => onStoryPointerDown(story.id, event)} onPointerUp={(event) => onStoryPointerUp(story.id, event)}>
@@ -740,7 +863,7 @@ export default function Home() {
         </aside>
 
         <article className="story-reader" aria-label="Selected story">
-          <div className="reader-body abs-scrollbar">
+          <div ref={readerBodyRef} className="reader-body abs-scrollbar">
             {visibleStories.length > 0 ? (
               <>
                 <div className="story-heading">
@@ -756,7 +879,7 @@ export default function Home() {
                 <div className="source-section" aria-label="Story sources">
                   <span>Sources</span>
                   <div className="source-links">
-                    {selected.sources.map((source) => (
+                    {selected.sources.filter(source => isSourceUrl(source.url)).map((source) => (
                       <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.publisher} ↗</a>
                     ))}
                   </div>
@@ -775,7 +898,7 @@ export default function Home() {
           <div className="reader-bottom">
             {showAgentPrompt && <form className="agent-prompt" onSubmit={(event) => { event.preventDefault(); handleVoiceCommand(agentPrompt); setAgentPrompt(""); }}>
               {agentReply && <p>{agentReply}</p>}
-              <div><input aria-label="Ask Absurdity to navigate" maxLength={2000} value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction">→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
+              <div><input ref={agentInputRef} aria-label="Ask Absurdity to navigate" maxLength={2000} value={agentPrompt} onChange={(event) => setAgentPrompt(event.target.value)} /><button type="submit" aria-label="Send instruction" disabled={!agentPrompt.trim()}>→</button><button type="button" onClick={() => setShowAgentPrompt(false)} aria-label="Close instruction box">×</button></div>
             </form>}
 
             {agentReply && !showAgentPrompt && <div className="agent-reply"><p>{agentReply}</p><button onClick={() => setAgentReply("")} aria-label="Dismiss reply">×</button></div>}

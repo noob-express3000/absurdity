@@ -3,9 +3,9 @@ import type { ConversationPlan, ConversationTurn } from './conversation';
 import { demoBriefing } from './demo-data';
 import { parseNavigation, type StoryView } from './navigation';
 import { GroqIntelligenceProvider } from './providers/intelligence';
-import { DemoStoryRepository, storyRepository } from './repository';
+import { DemoStoryRepository, storyRepository, type StoryRepository } from './repository';
 import type { Story } from './types';
-import { clampHistoryBefore, clampHomeFrom } from './story-lifecycle';
+import { clampHistoryBefore, clampHomeFrom, isHomePublicationDate, isHistoryPublicationDate } from './story-lifecycle';
 
 export type VoiceContext = {
   message: string;
@@ -14,6 +14,7 @@ export type VoiceContext = {
   visibleIds: string[];
   history: ConversationTurn[];
   displayMode?: 'demo' | 'live';
+  signal?: AbortSignal;
 };
 export type VoiceReply = {
   text: string;
@@ -26,6 +27,29 @@ export type VoiceReply = {
 
 function noAction(text: string): ConversationPlan {
   return { text, action: 'none', view: null, storyId: null, query: null, from: null, before: null, read: false };
+}
+
+async function searchArchive(repository: StoryRepository, plan: ConversationPlan, clock: number,
+  mode: VoiceReply['mode'], provider: VoiceReply['provider']): Promise<VoiceReply> {
+  const dates = { from: plan.from ?? undefined, before: plan.before ?? undefined };
+  if (plan.view === 'history') dates.before = clampHistoryBefore(dates.before, clock);
+  if (plan.view === 'home') dates.from = clampHomeFrom(dates.from, clock);
+  if (plan.view !== 'history' && (!dates.before || Date.parse(dates.before) > clock)) {
+    dates.before = new Date(clock + 1).toISOString();
+  }
+  const matches = await repository.searchStories(plan.query ?? '', 500, dates);
+  const home = matches.filter(story => isHomePublicationDate(story.publicationDate, clock));
+  const older = matches.filter(story => isHistoryPublicationDate(story.publicationDate, clock));
+  const view = plan.view ?? (home.length || !older.length ? 'home' : 'history');
+  const displayed = view === 'home' ? home : view === 'history' ? older : matches;
+  const text = view === 'favorites'
+    ? 'I found matching saved stories. I will show the ones you have favorited.'
+    : !matches.length ? 'No saved stories match that request.'
+    : `I found ${matches.length}${matches.length === 500 ? ' or more' : ''} matching ${mode === 'demo' ? 'demo ' : ''}${matches.length === 1 ? 'story' : 'stories'}.` +
+      (!plan.view && home.length && older.length
+        ? ` ${home.length} in Home and ${older.length} in History. Showing Home; ask for the same search in History to see older matches.` : '');
+  return { text, action: { ...plan, text, view, storyId: displayed[0]?.id ?? null }, stories: matches,
+    mode, provider, intent: 'archive-search' };
 }
 
 export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
@@ -42,20 +66,9 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   }
 
   if (local.action === 'search') {
-    const dates = { from: local.from, before: local.before };
-    if (local.view === 'history') dates.before = clampHistoryBefore(dates.before, clock);
-    if (local.view === 'home') dates.from = clampHomeFrom(dates.from, clock);
-    const matches = await repository.searchStories(local.query, 500, dates);
-    const text = local.view === 'favorites'
-      ? 'I found matching saved stories. I will show the ones you have favorited.'
-      : matches.length ? `I found ${matches.length}${matches.length === 500 ? ' or more' : ''} ${mode === 'demo' ? 'demo ' : ''}${matches.length === 1 ? 'story' : 'stories'} in the archive. ${matches[0].title}.`
-      : 'No saved stories match that request.';
-    return {
-      text,
-      action: { ...noAction(text), action: 'search', view: local.view, query: local.query,
-        from: local.from ?? null, before: local.before ?? null, storyId: matches[0]?.id ?? null },
-      stories: matches, mode, provider: 'deterministic', intent: 'archive-search',
-    };
+    return searchArchive(repository, { ...noAction('Searching the saved archive.'), action: 'search',
+      view: local.view, query: local.query, from: local.from ?? null, before: local.before ?? null },
+      clock, mode, 'deterministic');
   }
 
   if (local.action === 'view') {
@@ -64,7 +77,7 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
       provider: 'deterministic', intent: 'navigation', mode };
   }
 
-  if (['next', 'previous', 'favorite', 'dismiss', 'read'].includes(local.action)) {
+  if (['next', 'previous', 'favorite', 'unfavorite', 'dismiss', 'read'].includes(local.action)) {
     const text = 'Okay.';
     return { text, action: { ...noAction(text), action: local.action as ConversationPlan['action'] },
       provider: 'deterministic', intent: 'navigation', mode };
@@ -103,7 +116,7 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
     if (!provider.available()) throw new Error('Groq is not configured.');
     plan = await provider.planConversation(context.message, corpus, {
       storyId: current?.id, scope: context.scope, visibleIds: context.visibleIds, history: context.history, now: new Date(clock).toISOString(), mode,
-    });
+    }, context.signal);
     if (plan.action === 'refresh') throw new Error('Refresh requires an explicit refresh request.');
   } catch (error) {
     // Never substitute demo claims for a live conversation when a provider fails.
@@ -114,7 +127,7 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
       plan = { ...noAction('Searching the saved archive.'), action: 'search', view: instruction.view, query: instruction.query, from: instruction.from ?? null, before: instruction.before ?? null };
     } else if (instruction.action === 'view') {
       plan = { ...noAction(`Opening ${instruction.view}.`), action: 'view', view: instruction.view };
-    } else if (['next', 'previous', 'favorite', 'dismiss', 'read'].includes(instruction.action)) {
+    } else if (['next', 'previous', 'favorite', 'unfavorite', 'dismiss', 'read'].includes(instruction.action)) {
       plan = { ...noAction('Okay.'), action: instruction.action as ConversationPlan['action'] };
     } else if (mode === 'demo') {
       const answer = answerFromCorpus(context.message, current?.id);
@@ -128,19 +141,7 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   }
 
   if (plan.action === 'search') {
-    const targetView = plan.view ?? context.scope;
-    const dates = {
-      from: plan.from ?? undefined,
-      before: plan.before ?? undefined,
-    };
-    if (targetView === 'history') dates.before = clampHistoryBefore(dates.before, clock);
-    if (targetView === 'home') dates.from = clampHomeFrom(dates.from, clock);
-    const matches = await repository.searchStories(plan.query ?? '', 500, dates);
-    // Favorites are private browser state; the client applies that final filter.
-    const text = plan.view === 'favorites'
-      ? 'I found matching saved stories. I will show the ones you have favorited.'
-      : matches.length ? `I found ${matches.length}${matches.length === 500 ? ' or more' : ''} ${mode === 'demo' ? 'demo ' : ''}${matches.length === 1 ? 'story' : 'stories'} in the archive. ${matches[0].title}.` : 'No saved stories match that request.';
-    return { text, action: { ...plan, text, storyId: matches[0]?.id ?? null }, stories: matches, mode, provider: usedProvider, intent: 'archive-search' };
+    return searchArchive(repository, plan, clock, mode, usedProvider);
   }
   const text = mode === 'demo' && usedProvider === 'groq' && plan.action === 'none' ? `In this demo: ${plan.text}` : plan.text;
   return { text, action: { ...plan, text }, mode, provider: usedProvider, intent: 'conversation' };

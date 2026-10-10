@@ -1,5 +1,5 @@
 export interface VoiceProvider {
-  synthesize(text: string): Promise<ArrayBuffer>;
+  synthesize(text: string, signal?: AbortSignal): Promise<ArrayBuffer>;
 }
 
 export class NarrationError extends Error {
@@ -39,7 +39,7 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
     return Boolean(this.apiKey && this.voiceId);
   }
 
-  async synthesize(text: string) {
+  async synthesize(text: string, signal?: AbortSignal) {
     if (!this.apiKey || !this.voiceId) {
       throw new NarrationError("not_configured", !this.apiKey
         ? "Set ELEVENLABS_API_KEY in Render and redeploy."
@@ -50,7 +50,7 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
       "https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(this.voiceId),
       {
         method: "POST",
-        signal: AbortSignal.timeout(30000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
         headers: {
           "Content-Type": "application/json",
           "xi-api-key": this.apiKey,

@@ -12,8 +12,55 @@ const plan = { text: 'Here is the explanation.', action: 'none', view: null, sto
 const context = {message:'Tell me more',scope:'home' as const,visibleIds:[],history:[],displayMode:'demo' as const,storyId:demoBriefing.stories[0].id};
 
 test('conversation rejects invented actions, story IDs and invalid archive boundaries', () => {
-  for (const change of [{action:'web-search'},{action:'select',storyId:'invented'},{action:'search',view:'home'},{from:'tomorrow'},{from:'2026-10-02T00:00:00Z',before:'2026-10-01T00:00:00Z'},{text:''},{read:'true'}]) {
+  for (const change of [{action:'web-search'},{action:'select',storyId:'invented'},{view:'invented'},{from:'tomorrow'},{from:'2026-10-02T00:00:00Z',before:'2026-10-01T00:00:00Z'},{text:''},{read:'true'}]) {
     assert.throws(() => validateConversationPlan({...plan,...change},new Set()));
+  }
+});
+
+test('last-week archive searches return current stories instead of an impossible History interval', async () => {
+  const original = globalThis.fetch;
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    globalThis.fetch = async () => { throw new Error('Must not call a provider for an explicit archive search'); };
+    const result = await replyToVoice({ ...context, scope: 'history', message: 'find stories from the last week' });
+    const anchor = Math.max(...demoBriefing.stories.map(story => Date.parse(story.publicationDate)));
+    assert.equal(result.action.view, 'home');
+    assert.ok(result.stories!.length > 0);
+    assert.ok(result.stories!.every(story => Date.parse(story.publicationDate) >= anchor - 7 * 86400000));
+    assert.ok(result.stories!.every(story => Date.parse(story.publicationDate) <= anchor));
+    assert.equal(result.provider, 'deterministic');
+  } finally { globalThis.fetch = original; delete process.env.GROQ_API_KEY; }
+});
+
+test('topic search counts the full saved archive, not the small model-visible subset', async () => {
+  const originalBriefing = storyRepository.getCurrentBriefing;
+  const originalSearch = storyRepository.searchStories;
+  const originalFetch = globalThis.fetch;
+  const current = Array.from({ length: 40 }, (_, index) => ({ ...demoBriefing.stories[0],
+    id: `current-${index}`, publicationDate: new Date(Date.now() - 1000).toISOString(), isFixture: false }));
+  const older = Array.from({ length: 20 }, (_, index) => ({ ...demoBriefing.stories[1],
+    id: `older-${index}`, publicationDate: '2020-01-01T00:00:00.000Z', isFixture: false }));
+  try {
+    storyRepository.getCurrentBriefing = async () => ({ ...demoBriefing, mode: 'live', stories: current.slice(0, 12) });
+    storyRepository.searchStories = async (query, _limit, dates) => {
+      assert.equal(query, 'animal');
+      return [...current, ...older].filter(story =>
+        (!dates?.from || Date.parse(story.publicationDate) >= Date.parse(dates.from)) &&
+        (!dates?.before || Date.parse(story.publicationDate) < Date.parse(dates.before)));
+    };
+    globalThis.fetch = async () => { throw new Error('Explicit searches must not call Groq'); };
+    const result = await replyToVoice({ ...context, displayMode: 'live', message: 'what stories do you have about animals' });
+    assert.equal(result.stories!.length, 60);
+    assert.equal(result.action.view, 'home');
+    assert.match(result.text, /60 matching stories/);
+    assert.match(result.text, /40 in Home and 20 in History/);
+    const history = await replyToVoice({ ...context, displayMode: 'live', message: 'find animal stories in history' });
+    assert.equal(history.stories!.length, 20);
+    assert.equal(history.action.view, 'history');
+  } finally {
+    storyRepository.getCurrentBriefing = originalBriefing;
+    storyRepository.searchStories = originalSearch;
+    globalThis.fetch = originalFetch;
   }
 });
 

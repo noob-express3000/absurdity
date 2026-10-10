@@ -66,6 +66,11 @@ test("status is read-only and cross-site POST cannot start research", async () =
   }));
   assert.equal(crossSite.status, 403);
   assert.equal(await getResearchCycle(), null);
+  for (const origin of ['null', 'invalid origin']) {
+    assert.equal((await POST(new Request('https://app.example/api/research', {
+      method: 'POST', headers: { origin },
+    }))).status, 403);
+  }
 });
 
 test("duplicate POST joins an existing run without scheduling more work", async () => {

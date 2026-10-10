@@ -534,6 +534,9 @@ button {
 
 .agent-prompt p {
   margin: 0 2px 10px;
+  max-height: min(190px, 30dvh);
+  overflow-y: auto;
+  white-space: pre-line;
   font-size: 12px;
   line-height: 1.55;
   color: #555555;
@@ -597,6 +600,7 @@ button {
 
 .agent-reply p {
   margin: 0;
+  white-space: pre-line;
   font-size: 12.5px;
   line-height: 1.62;
   color: #444444;

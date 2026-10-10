@@ -147,6 +147,12 @@ read
 stop
 ```
 
+Catalogue commands also stay local: `enumerate stories`, `list all stories`,
+`how many stories are available`, `next page`, and `open story 17`.
+Listings use eight titles per page and preserve their numbers for selection.
+Topic searches cover the full saved archive unless a view is explicitly requested;
+recent matches open Home and older matches remain available through History.
+
 Conversational requests go through `/api/chat` and are grounded in the stored story archive.
 
 Explicit requests such as:

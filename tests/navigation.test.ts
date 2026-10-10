@@ -30,12 +30,36 @@ test('requested search combines geography, category, and publication-date bounds
 });
 test('exact dates use Johannesburg publication days and invalid dates are rejected', () => {
   assert.deepEqual(parseNavigation('find animal stories on 2026-10-01','history',clock),{
-    action:'search',view:'history',query:'animal',from:'2026-09-30T22:00:00.000Z',before:'2026-10-01T22:00:00.000Z',
+    action:'search',view:'home',query:'animal',from:'2026-09-30T22:00:00.000Z',before:'2026-10-01T22:00:00.000Z',
   });
   assert.equal(parseNavigation('find stories on 2026-02-30','history',clock).action,'unknown');
   const lastWeek = parseNavigation('find stories from the last week','home',clock);
   assert.equal(lastWeek.action,'search');
   if(lastWeek.action==='search') assert.equal(Date.parse(lastWeek.from!),clock-7*86400000);
+});
+
+test('recent search periods use Home while explicit older and favorite scopes remain independent', () => {
+  for (const message of ['find stories from the last week', 'find animal stories from the past 2 days', 'find recent animal stories']) {
+    const parsed = parseNavigation(message, 'history', clock);
+    assert.equal(parsed.action, 'search');
+    if (parsed.action === 'search') assert.equal(parsed.view, 'home', message);
+  }
+  for (const [message, view] of [
+    ['find animal stories in history', 'history'],
+    ['find older animal stories', 'history'],
+    ['find animal stories from the last week in my favorites', 'favorites'],
+  ]) {
+    const parsed = parseNavigation(message, 'home', clock);
+    assert.equal(parsed.action, 'search');
+    if (parsed.action === 'search') assert.equal(parsed.view, view, message);
+  }
+});
+
+test('removing a favorite is an explicit local command', () => {
+  for (const message of ['unfavorite', 'unfavourite this story', 'remove this story from my favorites']) {
+    assert.deepEqual(parseNavigation(message, 'favorites', clock), { action: 'unfavorite' });
+  }
+  assert.equal(parseNavigation('Why would I unfavorite this?', 'home', clock).action, 'unknown');
 });
 
  test('only explicit fetch requests refresh; archive searches and questions remain navigation', () => {

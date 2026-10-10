@@ -17,6 +17,42 @@ test('an API key alone reports the missing voice ID', async () => {
   } finally {delete process.env.ELEVENLABS_API_KEY;}
 });
 
+test('long narration never silently drops the end of a story or spends a provider call', async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new Error('Oversized narration must not call ElevenLabs'); };
+    const response = await POST(new Request('http://localhost/api/narrate', {
+      method: 'POST', body: JSON.stringify({ text: 'a'.repeat(5001) }),
+    }));
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.code, 'text_too_long');
+    assert.equal(body.fallback, 'browser-speech');
+  } finally { globalThis.fetch = original; }
+});
+
+test('narration forwards cancellation to the provider', async () => {
+  const original = globalThis.fetch;
+  const controller = new AbortController();
+  try {
+    process.env.ELEVENLABS_API_KEY = 'fake';
+    process.env.ELEVENLABS_VOICE_ID = 'voice';
+    globalThis.fetch = async (_url, init) => {
+      assert.equal(init?.signal?.aborted, false);
+      controller.abort();
+      assert.equal(init?.signal?.aborted, true);
+      throw init?.signal?.reason;
+    };
+    await POST(new Request('http://localhost/api/narrate', {
+      method: 'POST', body: JSON.stringify({ text: 'Cancel this request.' }), signal: controller.signal,
+    }));
+  } finally {
+    globalThis.fetch = original;
+    delete process.env.ELEVENLABS_API_KEY;
+    delete process.env.ELEVENLABS_VOICE_ID;
+  }
+});
+
 test('configured narration trims environment values and returns playable audio', async () => {
   const original=globalThis.fetch;
   try {

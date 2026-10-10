@@ -9,6 +9,10 @@ export async function POST(request: Request) {
     if (!text) {
       return NextResponse.json({ error: "Text is required." }, { status: 400 });
     }
+    if (text.length > 5000) {
+      return NextResponse.json({ error: "This story exceeds the narration request limit.",
+        code: "text_too_long", fallback: "browser-speech" }, { status: 400 });
+    }
 
     const provider = new ElevenLabsVoiceProvider();
     if (!provider.available()) {
@@ -21,7 +25,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const audio = await provider.synthesize(text.slice(0, 5000));
+    const audio = await provider.synthesize(text, request.signal);
     return new Response(audio, {
       headers: {
         "Content-Type": "audio/mpeg",

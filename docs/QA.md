@@ -1,5 +1,17 @@
 # QA: notebook reader and reliability fixes
 
+## Submission QA — 2026-10-10
+
+- Fixed the enumeration/search blocker: explicit catalogue requests count the actual saved or visible results, list eight titles per page, and retain stable story numbers. `enumerate stories`, `list all stories`, `how many stories are available`, `next page`, and `open story 17` stay local and do not spend Groq quota. Search results receive the same numbered catalogue, so selection is not limited to the model's 12-story conversational context.
+- Unscoped topic searches query the full saved archive. Recent matches open Home, older-only matches open History, and mixed results report both buckets. Exact recent dates and “last week” requests no longer create an impossible History interval. Explicit History and Favorites scopes retain their existing meanings; Home/History remain mutually exclusive.
+- Added local unfavorite commands, typed-input focus, bounded multiline replies, an honest empty-search message, and reader/selected-row scroll handling. Passive archive sync preserves the selected History article.
+- Bounded archive, chat, narration, research start and status requests through body consumption, with cancellation support that does not require modern AbortSignal helper APIs in the browser. Stopping narration aborts its request; disappearing articles stop their old speech or pending answer. Recognition pauses while thinking as well as while speaking. Simultaneous playback errors trigger device fallback only once.
+- Reject corrupt archive/conversation payloads safely, restrict reader links to HTTP(S), and reject malformed/opaque research origins. Oversized narration falls back to the full device reading rather than silently truncating at 5,000 characters.
+- Verified **78 automated tests**, TypeScript and a production build. All four browser suites passed: reader smoke, research, archive reliability, and the new 40-story edge-case suite. Checks include a 20-result search with numbered selection beyond result 12, aborted narration, duplicate media errors, favorite removal during playback, preserved History selection, corrupt rows, microphone echo suppression during thinking, and mobile reply bounds. Browser provider/audio behavior is stubbed for reproducibility.
+- Live baseline: deployed `f283bc2a` returned a healthy Turso diagnostic, 60 saved stories, an HTTP 200 Groq-grounded story answer, and HTTP 200 playable MPEG audio from ElevenLabs. That proves provider output, not audible playback or real microphone recognition on the recording device.
+
+Run the additional browser suite with `node tests/browser-edge-cases.mjs` against the isolated demo server described below. Production credentials are not needed for the automated browser suites.
+
 ## Latest reliability pass — 2026-10-07
 
 - Fixed repeat processing of selected stories: canonical URLs and recent event clusters are checked before paid provider work and the candidate cap. Unselected candidates remain eligible; unrelated later events may reuse a headline.
