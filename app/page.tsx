@@ -62,6 +62,7 @@ export default function Home() {
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [searchResults, setSearchResults] = useState<Story[] | null>(null);
   const [showAgentPrompt, setShowAgentPrompt] = useState(false);
+  const [storyBrowserOpen, setStoryBrowserOpen] = useState(false);
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentReply, setAgentReply] = useState("");
@@ -89,6 +90,7 @@ export default function Home() {
   const agentStoryRef = useRef<string | null>(null);
   const readerBodyRef = useRef<HTMLDivElement | null>(null);
   const storyListRef = useRef<HTMLDivElement | null>(null);
+  const storyBrowserRef = useRef<HTMLButtonElement | null>(null);
   const agentInputRef = useRef<HTMLInputElement | null>(null);
   const agentRequestRef = useRef(0);
   const agentControllerRef = useRef<AbortController | null>(null);
@@ -345,6 +347,7 @@ export default function Home() {
   }, [selectedId, visibleStories]);
 
   useEffect(() => {
+    setStoryBrowserOpen(false);
     readerBodyRef.current?.scrollTo({ top: 0 });
     storyListRef.current?.querySelector(`[aria-pressed="true"]`)?.scrollIntoView({ block: "nearest" });
     // Removing a favorite or updating the archive can change the article without
@@ -354,7 +357,16 @@ export default function Home() {
   }, [displayedStoryId]);
 
   useEffect(() => {
-    if (showAgentPrompt) agentInputRef.current?.focus();
+    if (storyBrowserOpen) {
+      storyListRef.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest" });
+    }
+  }, [storyBrowserOpen]);
+
+  useEffect(() => {
+    if (showAgentPrompt) {
+      setStoryBrowserOpen(false);
+      agentInputRef.current?.focus();
+    }
   }, [showAgentPrompt]);
 
   function resumeListening() {
@@ -483,6 +495,7 @@ export default function Home() {
   }
 
   function narrate() {
+    setStoryBrowserOpen(false);
     if (voiceState !== "idle" || agentBusy) return stopNarration();
     if (visibleStories.length) void speakText(`${selected.title}. ${selected.detailedSummary}`, selected.id);
   }
@@ -712,6 +725,7 @@ export default function Home() {
   });
 
   function startHandsFree() {
+    setStoryBrowserOpen(false);
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -765,6 +779,7 @@ export default function Home() {
 
   function changeTab(nextTab: Tab) {
     setTab(nextTab);
+    setStoryBrowserOpen(false);
     setSearchResults(null);
     stopNarration();
   }
@@ -838,12 +853,25 @@ export default function Home() {
           </div>
         ) : (
         <>
-        <aside className="story-sidebar" aria-label="Story titles">
-          <div ref={storyListRef} className="story-list abs-scrollbar">
+        <aside className={`story-sidebar${storyBrowserOpen ? " is-open" : ""}`} aria-label="Story titles"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && storyBrowserOpen) {
+              setStoryBrowserOpen(false);
+              storyBrowserRef.current?.focus();
+            }
+          }}>
+          <div id="story-list" ref={storyListRef} className="story-list abs-scrollbar">
             {visibleStories.length ? visibleStories.map((story) => (
               <div key={story.id} className={`story-row ${selected.id === story.id ? "is-selected" : ""}`}
                 onPointerDown={(event) => onStoryPointerDown(story.id, event)} onPointerUp={(event) => onStoryPointerUp(story.id, event)}>
-                <button className="story-title" onClick={() => { setSelectedId(story.id); stopNarration(); }} aria-pressed={selected.id === story.id}>
+                <button className="story-title" onClick={() => {
+                  setSelectedId(story.id);
+                  stopNarration();
+                  if (storyBrowserOpen) {
+                    setStoryBrowserOpen(false);
+                    storyBrowserRef.current?.focus({ preventScroll: true });
+                  }
+                }} aria-pressed={selected.id === story.id}>
                   {story.title}
                 </button>
                 <div className="row-actions">
@@ -856,6 +884,15 @@ export default function Home() {
             )) : <p className="empty-state">{emptyMessage}</p>}
           </div>
           <div className="list-navigation">
+            <button ref={storyBrowserRef} className="browse-stories" onClick={() => {
+              setShowAgentPrompt(false);
+              setStoryBrowserOpen(current => !current);
+            }}
+              aria-label={storyBrowserOpen ? "Close story list" : "Browse stories"} aria-expanded={storyBrowserOpen} aria-controls="story-list">
+              <span>Stories</span>
+              <span className="story-position">{visibleStories.length ? visibleStories.findIndex(story => story.id === selected.id) + 1 : 0} / {visibleStories.length}</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={storyBrowserOpen ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"}/></svg>
+            </button>
             {tab === "home" && dismissed.length > 0 && <button className="restore-action" onClick={restoreDismissed} aria-label={`Restore dismissed (${dismissed.length})`}>Restore</button>}
             <button onClick={() => selectAdjacent(-1)} disabled={!visibleStories.length} aria-label="Previous story" title="Previous"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6"/></svg></button>
             <button onClick={() => selectAdjacent(1)} disabled={!visibleStories.length} aria-label="Next story" title="Next"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
@@ -903,7 +940,10 @@ export default function Home() {
 
             {agentReply && !showAgentPrompt && <div className="agent-reply"><p>{agentReply}</p><button onClick={() => setAgentReply("")} aria-label="Dismiss reply">×</button></div>}
             <div className="voice-controls">
-              <button onClick={() => setShowAgentPrompt(current => !current)} className="type-button" aria-label="Type to Absurdity" aria-expanded={showAgentPrompt} title="Type to Absurdity"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg></button>
+              <button onClick={() => {
+                setStoryBrowserOpen(false);
+                setShowAgentPrompt(current => !current);
+              }} className="type-button" aria-label="Type to Absurdity" aria-expanded={showAgentPrompt} title="Type to Absurdity"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></svg></button>
               {(agentBusy || listening || voiceState !== "idle") && <span className={`voice-indicator ${listening && voiceState === "idle" && !agentBusy ? "is-listening" : ""}`} role="status"><span className="voice-wave" aria-hidden="true"><i/><i/><i/></span>{agentBusy ? "Thinking" : voiceState === "loading" ? "Preparing" : voiceState === "playing" ? "Speaking" : "Listening"}</span>}
               <button onClick={narrate} disabled={!visibleStories.length && !agentBusy && voiceState === "idle"} className="read-button" aria-label={agentBusy ? "Stop response" : voiceState === "loading" ? "Preparing…" : voiceState === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud">
                 {agentBusy ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : voiceState === "loading" ? <svg className="loading-ring" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8" strokeDasharray="34 16"/></svg> : voiceState === "playing" ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.8c0-.7.8-1.1 1.4-.7l10 6.2a.8.8 0 0 1 0 1.4l-10 6.2c-.6.4-1.4 0-1.4-.7V5.8Z"/></svg>}

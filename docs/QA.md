@@ -1,5 +1,12 @@
 # QA: notebook reader and reliability fixes
 
+## Mobile reader refinement — 2026-10-11
+
+- Replaced the clipped single-row phone header with a compact brand row and full-width navigation. Home, Favorites, History and Refresh all fit at 320px; navigation and voice controls have 44px-high tap targets.
+- The phone story list now opens from a Stories control with the current position and result count. Previous/next remain available while the list is closed. Choosing an article closes the picker and returns focus; Escape also closes it. The desktop sidebar remains visible.
+- Increased phone body text to 16px, adjusted article spacing, bounded reply/input panels to the actual card width, and added safe-area spacing. The viewport requests content resizing for an onscreen keyboard; opening typing closes the picker, and opening the picker closes typing.
+- Verified 84 automated tests and the production build, all five browser suites, and screenshots. The dedicated phone suite checks 320/360/393/414px widths, individual control bounds (not just document width), numbered selection beyond 12, favorites, dismissal/restore, picker focus, reduced-height keyboard typing, and restoration of the desktop layout. Keyboard coverage simulates the reduced viewport; physical keyboard behavior remains a device check.
+
 ## Follow-up QA — 2026-10-11 (Johannesburg)
 
 - Fixed contradictory view/timeframe requests such as `find older stories from last week` and an old exact date in Home. They now explain the incompatible range rather than returning an action rejected by the reader. Queries above the supported 200-character archive limit also receive a useful reply.
