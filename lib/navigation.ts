@@ -38,7 +38,9 @@ export function parseNavigation(raw: string, currentView: StoryView, now: number
       /^(?:remove|delete)(?: this(?: story)?)? from (?:my )?(?:favorites|favourites)$/.test(command)) return { action: "unfavorite" };
   if (/^(?:dismiss|skip)(?: this(?: story)?)?$/.test(command)) return { action: "dismiss" };
   if (/^(?:read|speak|read aloud|read this(?: story)?)$/.test(command)) return { action: "read" };
-  if (command === "stop listening") return { action: "stop-listening" };
+  const microphoneControl = update.replace(/\s+now$/, "");
+  if (/^stop (?:listening|recording)(?: to me)?$/.test(microphoneControl) ||
+      /^(?:turn|switch) off (?:the |my )?(?:mic|microphone)$/.test(microphoneControl)) return { action: "stop-listening" };
   if (/^(?:stop|stop reading)$/.test(command)) return { action: "stop" };
   const searchCommand = command.replace(/^(?:list|enumerate)\b/, "find")
     .replace(/^(?:what|which|how many) (.+?) stories (?:do (?:you|we) have|are (?:there|available))(.*)$/, "find $1 stories $2")

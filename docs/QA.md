@@ -1,5 +1,12 @@
 # QA: notebook reader and reliability fixes
 
+## Microphone shutdown — 2026-10-12
+
+- Explicit microphone shutdown now clears session ownership before calling recognition `abort()`, disables continuous capture and detaches result/error/end handlers. Stale result/end callbacks cannot act on the reader or restart listening, and a delayed native start from a stopped session is aborted again.
+- Rapid clicks cannot create a second, orphan recognition session. Startup, restart and permission failures release the existing session; unmount uses the same cleanup. Stopping while a reply is pending remains stopped after narration ends.
+- `stop recording`, polite variants of `stop listening`, and `turn off the microphone` are handled locally, without model or narration requests.
+- Verified 91 automated tests, the production build and all seven browser suites. The dedicated microphone suite tracks each mocked session's capture/start/abort state and checks button/spoken shutdown, rapid clicks, stale callbacks, delayed start, replacement ownership, stop during a pending answer, no restart after playback, startup/abort failures, permission denial and manual restart. Audio and recognition are mocked; physical browser/device microphone behavior remains the user's live check. No ElevenLabs credits used.
+
 ## Referenced-story voice navigation — 2026-10-12
 
 - Fixed the update-to-reading flow: daily, weekly and new-story requests search the saved archive, open the actual results and retain the IDs of the titles spoken in the reply. Daily means the previous 24 hours, weekly/new means the previous seven days, and today uses the Johannesburg calendar day. These requests do not launch discovery.

@@ -32,6 +32,10 @@ test('navigation distinguishes opening favorites, saving, and explicitly searchi
   assert.equal(parseNavigation('find stories about next generation robots', 'home', clock).action,'search');
   assert.equal(parseNavigation('anything interesting', 'home', clock).action,'unknown');
   assert.deepEqual(parseNavigation('stop listening', 'home', clock),{action:'stop-listening'});
+  for (const message of ['stop recording', 'stop listening please', 'could you stop listening please',
+    'please stop recording now', 'turn off the microphone', 'switch off my mic']) {
+    assert.deepEqual(parseNavigation(message, 'home', clock), {action:'stop-listening'}, message);
+  }
 });
 test('requested search combines geography, category, and publication-date bounds', async () => {
   const instruction = parseNavigation('find South African animal stories', 'home', clock);

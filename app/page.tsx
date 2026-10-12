@@ -20,6 +20,21 @@ const FAVORITES_KEY = "absurdity:favorites:v1";
 const DISMISSED_KEY = "absurdity:dismissed:v1";
 const ARCHIVE_REFRESH_MS = 5 * 60 * 1000;
 
+function releaseRecognition(recognition: any) {
+  if (!recognition) return;
+  recognition.onresult = null;
+  recognition.onerror = null;
+  recognition.onend = null;
+  recognition.continuous = false;
+  try {
+    if (typeof recognition.abort === "function") recognition.abort();
+    else recognition.stop?.();
+  } catch {
+    // A browser may already have ended this session. Still clear its ownership.
+    try { recognition.stop?.(); } catch { /* Already stopped. */ }
+  }
+}
+
 function cycleSummary(run: ResearchCycle) {
   return `Reviewed ${run.candidates} candidates; selected ${run.selected} ${run.selected === 1 ? "story" : "stories"}.`;
 }
@@ -302,7 +317,9 @@ export default function Home() {
   useEffect(() => {
     return () => {
       keepListeningRef.current = false;
-      recognitionRef.current?.stop?.();
+      const recognition = recognitionRef.current;
+      recognitionRef.current = null;
+      releaseRecognition(recognition);
       audioRef.current?.pause();
       narrationRequestRef.current += 1;
       narrationControllerRef.current?.abort();
@@ -372,13 +389,13 @@ export default function Home() {
   }, [showAgentPrompt]);
 
   function resumeListening() {
-    if (!keepListeningRef.current || speechActiveRef.current || recognitionStateRef.current !== "idle") return;
+    const recognition = recognitionRef.current;
+    if (!recognition || !keepListeningRef.current || speechActiveRef.current || recognitionStateRef.current !== "idle") return;
     try {
-      recognitionRef.current?.start();
+      recognition.start();
       recognitionStateRef.current = "running";
     } catch {
-      keepListeningRef.current = false;
-      setListening(false);
+      stopHandsFree();
       setShowAgentPrompt(true);
       setVoiceHint("Voice navigation could not restart. Type an instruction instead.");
     }
@@ -553,10 +570,12 @@ export default function Home() {
 
   function stopHandsFree() {
     keepListeningRef.current = false;
-    recognitionRef.current?.stop?.();
+    const recognition = recognitionRef.current;
     recognitionRef.current = null;
     recognitionStateRef.current = "idle";
     setListening(false);
+    setVoiceHint("Microphone off.");
+    releaseRecognition(recognition);
   }
 
   async function askAgent(message: string) {
@@ -760,6 +779,9 @@ export default function Home() {
   });
 
   function startHandsFree() {
+    // React can receive another click before its listening state has rendered.
+    // Own exactly one session so stopping cannot leave an orphan microphone.
+    if (keepListeningRef.current || recognitionRef.current) return;
     setStoryBrowserOpen(false);
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -774,16 +796,19 @@ export default function Home() {
     recognition.continuous = true;
     recognition.interimResults = false;
     recognition.lang = "en-US";
+    recognition.onstart = () => {
+      if (recognitionRef.current !== recognition || !keepListeningRef.current) releaseRecognition(recognition);
+    };
     recognition.onresult = (event: any) => {
-      if (speechActiveRef.current) return;
+      if (recognitionRef.current !== recognition || !keepListeningRef.current || speechActiveRef.current) return;
       const last = event.results[event.results.length - 1];
       const transcript = last?.[0]?.transcript?.trim();
       if (transcript) commandHandlerRef.current(transcript);
     };
     recognition.onerror = (event: any) => {
+      if (recognitionRef.current !== recognition || !keepListeningRef.current) return;
       if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event?.error)) {
-        keepListeningRef.current = false;
-        setListening(false);
+        stopHandsFree();
         setShowAgentPrompt(true);
       }
       if (event?.error !== "no-speech") {
@@ -802,8 +827,7 @@ export default function Home() {
     try {
       if (!speechActiveRef.current) { recognition.start(); recognitionStateRef.current = "running"; }
     } catch {
-      keepListeningRef.current = false;
-      recognitionRef.current = null;
+      stopHandsFree();
       setVoiceHint("Voice navigation could not start. Please try again.");
       setShowAgentPrompt(true);
       return;

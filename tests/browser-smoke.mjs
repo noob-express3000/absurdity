@@ -161,7 +161,7 @@ await page.getByRole('button',{name:'History',exact:true}).click();
 assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 if (screenshotDir) await page.screenshot({path:screenshotDir+'/mobile.png',fullPage:true});
 await page.getByRole('button',{name:'Talk to Absurdity'}).click();
-await page.evaluate(()=>{window.qaRecognition.onerror({error:'not-allowed'});window.qaRecognition.onend();});
+await page.evaluate(()=>{window.qaRecognition.onerror({error:'not-allowed'});window.qaRecognition.onend?.();});
 await page.getByRole('button',{name:'Talk to Absurdity'}).waitFor();
 await page.getByRole('textbox',{name:'Ask Absurdity to navigate'}).fill('open history');
 await page.getByRole('button',{name:'Send instruction'}).click();
