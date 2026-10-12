@@ -5,6 +5,27 @@ import { DemoStoryRepository } from '../lib/repository';
 import { demoBriefing } from '../lib/demo-data';
 const clock = Math.max(...demoBriefing.stories.map(story => Date.parse(story.publicationDate)));
 
+test('daily, weekly and new-story updates retrieve navigable saved stories with bounded dates', () => {
+  for (const [message, days] of [
+    ['give me a weekly update', 7], ['weekly update', 7], ['what happened this week', 7],
+    ['give me an update for the week', 7], ['what are the new stories', 7], ["what's new", 7],
+    ['tell me about new stories', 7], ['show new stories', 7], ['give me a daily update', 1],
+    ['daily briefing', 1], ['give me an update for the day', 1],
+  ] as const) {
+    const result = parseNavigation(message, 'history', clock);
+    assert.equal(result.action, 'search', message);
+    if (result.action === 'search') {
+      assert.equal(result.query, '', message);
+      assert.equal(result.view, 'home', message);
+      assert.equal(Date.parse(result.from!), clock - days * 86400000, message);
+      assert.equal(Date.parse(result.before!), clock + 1, message);
+    }
+  }
+  const today = parseNavigation("give me today's update", 'history', Date.parse('2026-10-12T00:30:00Z'));
+  assert.equal(today.action, 'search');
+  if (today.action === 'search') assert.equal(today.from, '2026-10-11T22:00:00.000Z');
+});
+
 test('navigation distinguishes opening favorites, saving, and explicitly searching the archive', () => {
   assert.deepEqual(parseNavigation('show my favorites', 'home', clock), {action:'view',view:'favorites'});
   assert.deepEqual(parseNavigation('save this story', 'home', clock), {action:'favorite'});

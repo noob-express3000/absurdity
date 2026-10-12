@@ -10,6 +10,20 @@ export type NavigationRequest =
 // Archive navigation stays local; only an explicit refresh request launches research.
 export function parseNavigation(raw: string, currentView: StoryView, now: number): NavigationRequest {
   const command = raw.toLowerCase().trim().replace(/[.!?]+$/, "").replace(/^please\s+/, "");
+  const update = command.replace(/^(?:can|could|would) you (?:please )?/, "")
+    .replace(/\s+please$/, "");
+  const normalizedUpdate = update.replace(/^what (?:happened|have (?:you|we) got|do (?:you|we) have) (today|this week|last week)$/, 'give me $1 stories')
+    .replace(/^(?:give|show) me (?:an? |the )?update (?:for|from|of) (?:the )?(day|week)$/, (_, period: string) => `give me ${period === 'day' ? 'daily' : 'weekly'} update`);
+  const updatePeriod = normalizedUpdate.match(/^(?:(?:give|show|get) me |(?:tell|brief|update) me(?: with| on| about)? |(?:what(?:'s| is| are) )?)(?:a |the |my |our )?(daily|weekly|today(?:'s)?|this week(?:'s)?|last week(?:'s)?|past week(?:'s)?|new|latest|recent)(?: (?:story|news))?(?: update| briefing| roundup| stories| news)(?: (?:please|update|briefing|of (?:the )?(?:stories|news)))?$/);
+  if (updatePeriod || /^(?:daily|weekly) (?:update|briefing|roundup)$/.test(update) || /^(?:what(?:'s| is) new|what are the new stories|show new stories|new stories)$/.test(update)) {
+    const timeframe = updatePeriod?.[1] ?? (update.startsWith("daily") ? "daily" : "weekly");
+    const days = /daily|today/.test(timeframe) ? 1 : 7;
+    const today = timeframe.startsWith("today");
+    const from = today
+      ? new Date(Math.floor((now + 2 * 3600000) / 86400000) * 86400000 - 2 * 3600000).toISOString()
+      : new Date(now - days * 86400000).toISOString();
+    return { action: "search", query: "", view: "home", from, before: new Date(now + 1).toISOString() };
+  }
   const refresh = command.replace(/^(?:can|could|would) you (?:please )?/, "")
     .replace(/^please\s+/, "").replace(/\s+(?:please|again|now)$/, "");
   if (/^(?:refresh|reload)$/.test(refresh) ||

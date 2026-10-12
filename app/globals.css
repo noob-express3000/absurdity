@@ -734,6 +734,7 @@ button {
 }
 
 .fetch-notice {
+  pointer-events: none;
   position: fixed;
   left: 50%;
   bottom: 24px;

@@ -1,5 +1,14 @@
 # QA: notebook reader and reliability fixes
 
+## Referenced-story voice navigation — 2026-10-12
+
+- Fixed the update-to-reading flow: daily, weekly and new-story requests search the saved archive, open the actual results and retain the IDs of the titles spoken in the reply. Daily means the previous 24 hours, weekly/new means the previous seven days, and today uses the Johannesburg calendar day. These requests do not launch discovery.
+- Named story navigation resolves against the saved archive rather than the model's first 12 stories. Numbered selections retain absolute catalogue indices; `open the second one you mentioned` follows the spoken reply/page order. Ambiguous references ask for a choice and preserve the current article.
+- Groq replies now include a validated `references` array of supplied story IDs. Subsequent turns retrieve these referenced stories even outside the visible list. Responses carry the referenced/selected saved articles, and the reader merges them before applying navigation, including Home/History transitions and restoration of explicitly selected dismissed stories.
+- Fixed a phone interaction found during the same flow: narration/fetch status notices no longer intercept taps on the instruction form. The storage reload smoke check waits for persistence before reloading.
+- Verified 91 automated regressions, TypeScript and the production build. All six browser suites passed. The new suite exercises the real chat route and demo repository for weekly/daily/new updates followed by referenced selection and narration, then checks 40-story title/number selection, spoken-page order, model references, an article delivered outside the initial archive, ambiguity and desktop/phone layouts with controlled API responses.
+- Audio and recognition were stubbed for browser verification; no ElevenLabs credits or live research requests were used. The user will perform the live voice test.
+
 ## Mobile reader refinement — 2026-10-11
 
 - Replaced the clipped single-row phone header with a compact brand row and full-width navigation. Home, Favorites, History and Refresh all fit at 320px; navigation and voice controls have 44px-high tap targets.

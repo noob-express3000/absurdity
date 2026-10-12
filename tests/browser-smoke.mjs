@@ -76,18 +76,19 @@ assert.equal(turns[1].history.at(-1).content,'The article is a demonstration fix
 assert.equal(turns[0].storyId,turns[1].storyId);
 await page.getByRole('button',{name:'Stop reading'}).click();
 await page.unroute('**/api/chat');
-// A Groq selection outside a favorites search opens the archive and reads that article.
-let selectedReply;
+// Naming a saved story outside a favorites search opens it locally and reads it.
+const selectedReply=(await (await page.request.get(baseUrl+'/api/stories?scope=history')).json()).stories[0];
+let namedStoryChats=0;
 await page.route('**/api/chat',async route=>{
-  selectedReply=(await (await page.request.get(baseUrl+'/api/stories?scope=history')).json()).stories[0];
-  const action={text:'Opening that story.',action:'select',view:null,storyId:selectedReply.id,query:null,from:null,before:null,read:true};
-  await route.fulfill({contentType:'application/json',body:JSON.stringify({text:action.text,action,provider:'groq',mode:'demo'})});
+  namedStoryChats++;
+  await route.fulfill({status:500,json:{error:'Named selection must stay local'}});
 });
 await command('please open the emu article and read it');
 await page.getByRole('button',{name:'Stop reading'}).waitFor();
 assert.equal(await storyTitle(),selectedReply.title);
 assert.equal(await page.locator('nav button[aria-current]').innerText(),'History');
 assert.match(await page.evaluate(()=>window.qaSaid.at(-1)),/Escaped emu/);
+assert.equal(namedStoryChats,0);
 await page.getByRole('button',{name:'Stop reading'}).click();
 await page.unroute('**/api/chat');
 // Selecting a current Home story from History must route back to Home rather than
@@ -125,6 +126,7 @@ await page.getByRole('button',{name:'Home',exact:true}).first().click();
 const before=await page.locator('.story-row').count();
 await page.getByRole('button',{name:'Dismiss story',exact:true}).first().click();
 assert.equal(await page.locator('.story-row').count(),before-1);
+await page.waitForFunction(() => JSON.parse(localStorage.getItem('absurdity:dismissed:v1') || '[]').length > 0);
 await page.reload();
 await page.getByRole('button',{name:/Restore dismissed/}).waitFor();
 assert.equal(await page.locator('.story-row').count(),before-1);

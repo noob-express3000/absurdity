@@ -6,6 +6,8 @@ import { GroqIntelligenceProvider } from './providers/intelligence';
 import { DemoStoryRepository, storyRepository, type StoryRepository } from './repository';
 import type { Story } from './types';
 import { clampHistoryBefore, clampHomeFrom, isHomePublicationDate, isHistoryPublicationDate } from './story-lifecycle';
+import { catalogueText, CATALOGUE_PAGE_SIZE } from './catalogue';
+import { parseStoryReference, resolveStoryReference } from './story-reference';
 
 export type VoiceContext = {
   message: string;
@@ -15,6 +17,7 @@ export type VoiceContext = {
   history: ConversationTurn[];
   displayMode?: 'demo' | 'live';
   signal?: AbortSignal;
+  referenceIds?: string[];
 };
 export type VoiceReply = {
   text: string;
@@ -70,6 +73,25 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   const clock = mode === 'demo' ? Math.max(...demoBriefing.stories.map(story => Date.parse(story.publicationDate))) : Date.now();
   const local = parseNavigation(context.message, context.scope, clock);
 
+  const reference = local.action === 'unknown' ? parseStoryReference(context.message) : null;
+  if (reference) {
+    const mentioned = (await Promise.all((context.referenceIds ?? []).map(id => repository.getStory(id))))
+      .filter((story): story is Story => Boolean(story?.status === 'selected'));
+    const candidates = reference.mentioned ? [] : await repository.searchStories('', 500, { before: new Date(clock + 1).toISOString() });
+    const matches = resolveStoryReference(reference, candidates, mentioned);
+    if (matches.length === 1) {
+      const target = matches[0];
+      const text = `Opening ${target.title}.`;
+      return { text, action: { ...noAction(text), action: 'select', storyId: target.id,
+        read: reference.read, references: [target.id] }, stories: matches, provider: 'deterministic', intent: 'navigation', mode };
+    }
+    const text = matches.length ? `Which story do you mean?\n${catalogueText(matches, 'matching that reference')}`
+      : reference.mentioned ? 'I do not have that story reference. Ask for an update or name the story.'
+      : 'No saved story matches that title. Try a distinctive word from its headline.';
+    return { text, action: { ...noAction(text), references: matches.slice(0, CATALOGUE_PAGE_SIZE).map(story => story.id) },
+      ...(matches.length ? { stories: matches } : {}), provider: 'deterministic', intent: 'navigation', mode };
+  }
+
   if (local.action === 'refresh') {
     const text = 'Starting a story fetch. I will keep the reader open while it runs.';
     return { text, action: { ...noAction(text), action: 'refresh' },
@@ -105,7 +127,8 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   // so no stored stories are discarded or made unreachable.
   const known = new Map(briefing.stories.map(story => [story.id, story]));
   if (current) known.set(current.id, current);
-  const missingIds = context.visibleIds.filter(id => !known.has(id));
+  const referenceIds = context.referenceIds ?? [];
+  const missingIds = [...new Set([...referenceIds, ...context.visibleIds])].filter(id => !known.has(id));
   const fetchedVisible = await Promise.all(missingIds.map(id => repository.getStory(id)));
   for (const story of fetchedVisible) {
     if (story?.status === 'selected') known.set(story.id, story);
@@ -113,13 +136,15 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   const visible = context.visibleIds
     .map(id => known.get(id))
     .filter((story): story is Story => Boolean(story && story.status === 'selected'));
+  const referenced = referenceIds.map(id => known.get(id)).filter((story): story is Story => Boolean(story?.status === 'selected'));
 
   // Most conversational questions are about the selected story. Only explicit
   // comparison/list language needs the wider visible set in model context.
-  const wantsVisibleSet = /\b(compare|comparison|which|these|those|all|stories|weirdest|strangest|funniest|most absurd|top|rank|ranking)\b/i.test(context.message);
+  const wantsVisibleSet = /\b(compare|comparison|which|these|those|that|all|stories|weirdest|strangest|funniest|most absurd|top|rank|ranking|mentioned|update|briefing|open|select|navigate)\b/i.test(context.message);
+  const wider = [...new Map([...referenced, ...visible].map(story => [story.id, story])).values()];
   const corpus = current
-    ? [current, ...(wantsVisibleSet ? visible.filter(story => story.id !== current.id).slice(0, 12) : [])]
-    : visible.slice(0, wantsVisibleSet ? 12 : 4);
+    ? [current, ...(wantsVisibleSet ? wider.filter(story => story.id !== current.id).slice(0, 12) : [])]
+    : wider.slice(0, wantsVisibleSet ? 12 : 4);
   const provider = new GroqIntelligenceProvider();
   let plan: ConversationPlan;
   let usedProvider: VoiceReply['provider'] = 'groq';
@@ -127,7 +152,7 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
   try {
     if (!provider.available()) throw new Error('Groq is not configured.');
     plan = await provider.planConversation(context.message, corpus, {
-      storyId: current?.id, scope: context.scope, visibleIds: context.visibleIds, history: context.history, now: new Date(clock).toISOString(), mode,
+      storyId: current?.id, scope: context.scope, visibleIds: context.visibleIds, referenceIds, history: context.history, now: new Date(clock).toISOString(), mode,
     }, context.signal);
     if (plan.action === 'refresh') throw new Error('Refresh requires an explicit refresh request.');
   } catch (error) {
@@ -156,5 +181,8 @@ export async function replyToVoice(context: VoiceContext): Promise<VoiceReply> {
     return searchArchive(repository, plan, clock, mode, usedProvider);
   }
   const text = mode === 'demo' && usedProvider === 'groq' && plan.action === 'none' ? `In this demo: ${plan.text}` : plan.text;
-  return { text, action: { ...plan, text }, mode, provider: usedProvider, intent: 'conversation' };
+  const replyStories = [...new Set([...(plan.references ?? []), ...(plan.storyId ? [plan.storyId] : [])])]
+    .map(id => known.get(id)).filter((story): story is Story => Boolean(story));
+  return { text, action: { ...plan, text }, ...(replyStories.length ? { stories: replyStories } : {}),
+    mode, provider: usedProvider, intent: 'conversation' };
 }

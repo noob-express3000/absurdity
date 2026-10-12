@@ -12,9 +12,73 @@ const plan = { text: 'Here is the explanation.', action: 'none', view: null, sto
 const context = {message:'Tell me more',scope:'home' as const,visibleIds:[],history:[],displayMode:'demo' as const,storyId:demoBriefing.stories[0].id};
 
 test('conversation rejects invented actions, story IDs and invalid archive boundaries', () => {
-  for (const change of [{action:'web-search'},{action:'select',storyId:'invented'},{view:'invented'},{from:'tomorrow'},{from:'2026-10-02T00:00:00Z',before:'2026-10-01T00:00:00Z'},{text:''},{read:'true'}]) {
+  for (const change of [{action:'web-search'},{action:'select',storyId:'invented'},{references:['invented']},{references:'invented'},{view:'invented'},{from:'tomorrow'},{from:'2026-10-02T00:00:00Z',before:'2026-10-01T00:00:00Z'},{text:''},{read:'true'}]) {
     assert.throws(() => validateConversationPlan({...plan,...change},new Set()));
   }
+});
+
+test('update requests return the full dated archive and select an actual first result without Groq', async () => {
+  const originalSearch = storyRepository.searchStories;
+  const originalBriefing = storyRepository.getCurrentBriefing;
+  const originalFetch = globalThis.fetch;
+  const stories = Array.from({ length: 40 }, (_, index) => ({ ...demoBriefing.stories[0], id: `update-${index}`,
+    publicationDate: new Date(Date.now() - (index + 0.5) * 3600000).toISOString(), isFixture: false }));
+  try {
+    storyRepository.getCurrentBriefing = async () => { throw new Error('Updates must search beyond the limited briefing'); };
+    storyRepository.searchStories = async (query, limit, dates) => {
+      assert.equal(query, ''); assert.equal(limit, 500);
+      return stories.filter(story => Date.parse(story.publicationDate) >= Date.parse(dates!.from!) && Date.parse(story.publicationDate) < Date.parse(dates!.before!));
+    };
+    globalThis.fetch = async () => { throw new Error('Updates must not call providers'); };
+    for (const message of ['give me a weekly update', 'give me a daily update', 'what are the new stories']) {
+      const result = await replyToVoice({ ...context, displayMode: 'live', scope: 'history', message });
+      assert.equal(result.action.action, 'search');
+      assert.equal(result.action.view, 'home');
+      assert.equal(result.action.storyId, result.stories![0].id);
+      assert.equal(result.stories!.length, message.includes('daily') ? 24 : 40);
+      assert.equal(result.provider, 'deterministic');
+    }
+  } finally { storyRepository.searchStories = originalSearch; storyRepository.getCurrentBriefing = originalBriefing; globalThis.fetch = originalFetch; }
+});
+
+test('named and mentioned stories outside the visible subset open and return their saved article', async () => {
+  const originalSearch = storyRepository.searchStories;
+  const originalStory = storyRepository.getStory;
+  const originalBriefing = storyRepository.getCurrentBriefing;
+  const target = { ...demoBriefing.stories[0], id: 'outside-context', title: 'Alligator patrols airport baggage claim', isFixture: false };
+  try {
+    storyRepository.getCurrentBriefing = async () => { throw new Error('Selection must not depend on briefing'); };
+    storyRepository.searchStories = async () => [target];
+    storyRepository.getStory = async id => id === target.id ? target : null;
+    for (const message of ['open the alligator story', 'read the story you mentioned']) {
+      const result = await replyToVoice({ ...context, displayMode: 'live', message, referenceIds: [target.id] });
+      assert.equal(result.action.action, 'select'); assert.equal(result.action.storyId, target.id);
+      assert.equal(result.action.read, message.startsWith('read'));
+      assert.deepEqual(result.stories, [target]); assert.equal(result.provider, 'deterministic');
+    }
+  } finally { storyRepository.searchStories = originalSearch; storyRepository.getStory = originalStory; storyRepository.getCurrentBriefing = originalBriefing; }
+});
+
+test('model references remain grounded and available to a follow-up outside the visible story list', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalBriefing = storyRepository.getCurrentBriefing;
+  const originalStory = storyRepository.getStory;
+  const target = { ...demoBriefing.stories[0], id: 'remembered-reference', isFixture: false };
+  const current = { ...demoBriefing.stories[1], id: 'current-story', isFixture: false };
+  try {
+    process.env.GROQ_API_KEY = 'fake';
+    storyRepository.getCurrentBriefing = async () => ({ ...demoBriefing, mode: 'live', stories: [current] });
+    storyRepository.getStory = async id => id === target.id ? target : current;
+    globalThis.fetch = async (_url, init) => {
+      const input = JSON.parse(JSON.parse(String(init?.body)).input);
+      assert.deepEqual(input.stories.map((story: any) => story.id), [current.id, target.id]);
+      assert.deepEqual(input.context.referenceIds, [target.id]);
+      return Response.json({ output_text: JSON.stringify({ ...plan, references: [target.id] }) });
+    };
+    const result = await replyToVoice({ ...context, storyId: current.id, displayMode: 'live',
+      message: 'Why is the story you mentioned interesting?', referenceIds: [target.id] });
+    assert.deepEqual(result.action.references, [target.id]); assert.deepEqual(result.stories, [target]);
+  } finally { globalThis.fetch = originalFetch; storyRepository.getCurrentBriefing = originalBriefing; storyRepository.getStory = originalStory; delete process.env.GROQ_API_KEY; }
 });
 
 test('last-week archive searches return current stories instead of an impossible History interval', async () => {

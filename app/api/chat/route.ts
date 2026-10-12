@@ -19,11 +19,12 @@ export async function POST(request: Request) {
     if (body.voice === true) {
       const scope = ["home", "favorites", "history"].includes(body.scope) ? body.scope : "home";
       const visibleIds = Array.isArray(body.visibleIds) ? body.visibleIds.filter((id: unknown) => typeof id === "string" && id.length <= 150).slice(0, 24) : [];
+      const referenceIds = Array.isArray(body.referenceIds) ? body.referenceIds.filter((id: unknown) => typeof id === "string" && id.length <= 150).slice(0, 24) : [];
       const history: ConversationTurn[] = Array.isArray(body.history)
         ? body.history.filter((turn: any) => ["user", "assistant"].includes(turn?.role) && typeof turn?.content === "string")
           .slice(-8).map((turn: ConversationTurn) => ({ role: turn.role, content: turn.content.slice(0, 2000) })) : [];
       const displayMode = process.env.ABSURDITY_MODE === "demo" ? "demo" : "live";
-      return NextResponse.json(await replyToVoice({ message, storyId, scope, visibleIds, history, displayMode, signal: request.signal }));
+      return NextResponse.json(await replyToVoice({ message, storyId, scope, visibleIds, referenceIds, history, displayMode, signal: request.signal }));
     }
 
     const briefing = await storyRepository.getCurrentBriefing();

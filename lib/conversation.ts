@@ -12,6 +12,7 @@ export type ConversationPlan = {
   from: string | null;
   before: string | null;
   read: boolean;
+  references?: string[];
 };
 export const conversationSchema = {
   type: 'object',
@@ -24,8 +25,9 @@ export const conversationSchema = {
     from: { type: ['string', 'null'] },
     before: { type: ['string', 'null'] },
     read: { type: 'boolean' },
+    references: { type: 'array', items: { type: 'string' } },
   },
-  required: ['text', 'action', 'view', 'storyId', 'query', 'from', 'before', 'read'],
+  required: ['text', 'action', 'view', 'storyId', 'query', 'from', 'before', 'read', 'references'],
   additionalProperties: false,
 };
 
@@ -37,10 +39,12 @@ export function validateConversationPlan(value: unknown, allowedIds: Set<string>
   if (plan.storyId !== null && (typeof plan.storyId !== 'string' || !allowedIds.has(plan.storyId))) throw new Error('Unknown story.');
   if (plan.action === 'select' && !plan.storyId) throw new Error('Selection requires a stored story.');
   if (plan.action === 'view' && !plan.view) throw new Error('View required.');
+  if (plan.references !== undefined && (!Array.isArray(plan.references) || plan.references.length > 24 ||
+      plan.references.some(id => typeof id !== 'string' || !allowedIds.has(id)))) throw new Error('Unknown story reference.');
   if (plan.query !== null && (typeof plan.query !== 'string' || plan.query.length > 200)) throw new Error('Invalid archive query.');
   for (const date of [plan.from, plan.before]) {
     if (date !== null && (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(date) || !Number.isFinite(Date.parse(date)))) throw new Error('Invalid date bounds.');
   }
   if (plan.from && plan.before && Date.parse(plan.from) >= Date.parse(plan.before)) throw new Error('Inverted date bounds.');
-  return { ...plan, text: plan.text.trim(), from: plan.from ? new Date(plan.from).toISOString() : null, before: plan.before ? new Date(plan.before).toISOString() : null };
+  return { ...plan, references: [...new Set(plan.references ?? [])], text: plan.text.trim(), from: plan.from ? new Date(plan.from).toISOString() : null, before: plan.before ? new Date(plan.before).toISOString() : null };
 }

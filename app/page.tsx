@@ -11,6 +11,7 @@ import type { VoiceReply } from "@/lib/voice-agent";
 import { HOME_WINDOW_DAYS, isHistoryPublicationDate, isHomePublicationDate } from "@/lib/story-lifecycle";
 import { isReaderStory, isSourceUrl, readerRequest } from "@/lib/reader-request";
 import { CATALOGUE_PAGE_SIZE, catalogueText, parseCatalogueCommand } from "@/lib/catalogue";
+import { parseStoryReference, resolveStoryReference } from "@/lib/story-reference";
 
 type Tab = "home" | "favorites" | "history";
 type VoiceState = "idle" | "loading" | "playing";
@@ -96,6 +97,7 @@ export default function Home() {
   const agentControllerRef = useRef<AbortController | null>(null);
   const conversationRef = useRef<ConversationTurn[]>([]);
   const catalogueRef = useRef<{ stories: Story[]; label: string; page: number } | null>(null);
+  const storyReferencesRef = useRef<Story[]>([]);
   const speechActiveRef = useRef(false);
   const recognitionStateRef = useRef<"idle" | "running" | "stopping">("idle");
   const audioUrlRef = useRef<string | null>(null);
@@ -529,6 +531,15 @@ export default function Home() {
     stopNarration();
   }
 
+  function openSavedStory(target: Story) {
+    stopNarration();
+    setDismissed(current => current.filter(id => id !== target.id));
+    if (!visibleStories.some(story => story.id === target.id)) {
+      changeTab(isHomePublicationDate(target.publicationDate, anchorTime) ? "home" : "history");
+    }
+    setSelectedId(target.id);
+  }
+
   function onStoryPointerDown(storyId: string, event: ReactPointerEvent<HTMLDivElement>) {
     gestureRef.current = { id: storyId, x: event.clientX };
   }
@@ -568,6 +579,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ voice: true, message, storyId: visibleStories.length ? selected.id : undefined,
           scope: tab, visibleIds: visibleStories.slice(0, 24).map(story => story.id),
+          referenceIds: storyReferencesRef.current.map(story => story.id),
           history: conversationRef.current }),
       }, async response => {
         if (!response.ok) throw new Error("Conversation unavailable");
@@ -583,7 +595,15 @@ export default function Home() {
       agentStoryRef.current = null;
       const plan = reply.action;
       let text = reply.text;
-      let target = plan.storyId ? stories.find(story => story.id === plan.storyId) : visibleStories.length ? selected : undefined;
+      const knownStories = [...new Map([...stories, ...(reply.stories ?? [])].map(story => [story.id, story])).values()];
+      if (reply.mode === "live" && reply.stories?.length) setRemoteStories(knownStories);
+      const referenced = (plan.references ?? []).map(id => knownStories.find(story => story.id === id)).filter((story): story is Story => Boolean(story));
+      if (referenced.length) {
+        storyReferencesRef.current = referenced;
+        catalogueRef.current = { stories: reply.intent === "navigation" ? reply.stories ?? referenced : referenced,
+          label: "in my last reply", page: 0 };
+      }
+      let target = plan.storyId ? knownStories.find(story => story.id === plan.storyId) : visibleStories.length ? selected : undefined;
       switch (plan.action) {
         case "refresh": void fetchStories(true); return;
         case "view":
@@ -600,18 +620,7 @@ export default function Home() {
           break;
         }
         case "select": case "read":
-          if (target) {
-            if (!visibleStories.some(story => story.id === target!.id)) {
-              if (isHomePublicationDate(target.publicationDate, anchorTime)) {
-                setDismissed(current => current.filter(id => id !== target!.id));
-                changeTab("home");
-              } else {
-                changeTab("history");
-              }
-            }
-            setSelectedId(target.id);
-            stopNarration();
-          }
+          if (target) openSavedStory(target);
           break;
         case "favorite": case "unfavorite":
           if (target) setFavorites(current => plan.action === "favorite"
@@ -631,6 +640,7 @@ export default function Home() {
           if (target) setSelectedId(target.id);
           const label = `in these ${reply.mode === "demo" ? "demo " : ""}${plan.view === "favorites" ? "favorite " : ""}search results`;
           catalogueRef.current = { stories: displayed, label, page: 0 };
+          storyReferencesRef.current = displayed.slice(0, CATALOGUE_PAGE_SIZE);
           text = `${plan.view === "favorites" ? "" : reply.text + "\n"}${catalogueText(displayed, label)}`;
           break;
         }
@@ -654,6 +664,36 @@ export default function Home() {
   }
 
   function handleVoiceCommand(raw: string) {
+    const reference = parseStoryReference(raw);
+    if (reference && dataMode !== "loading") {
+      const mentioned = storyReferencesRef.current;
+      const candidates = stories.filter(story => isHomePublicationDate(story.publicationDate, anchorTime) || isHistoryPublicationDate(story.publicationDate, anchorTime));
+      const matches = resolveStoryReference(reference, candidates, mentioned);
+      // Unmatched titles can still be resolved by the server's saved archive.
+      if (matches.length || reference.mentioned) {
+        stopNarration();
+        let text: string;
+        if (matches.length === 1) {
+          const target = matches[0];
+          openSavedStory(target);
+          text = `Opening ${target.title}.`;
+          setAgentReply(text);
+          setVoiceHint(text);
+          conversationRef.current = [...conversationRef.current, { role: "user", content: raw }, { role: "assistant", content: text }].slice(-8) as ConversationTurn[];
+          void speakText(reference.read ? `${target.title}. ${target.detailedSummary}` : text, reference.read ? target.id : undefined);
+          return;
+        }
+        if (matches.length) {
+          catalogueRef.current = { stories: matches, label: "matching that reference", page: 0 };
+          storyReferencesRef.current = matches.slice(0, CATALOGUE_PAGE_SIZE);
+          text = `Which story do you mean?\n${catalogueText(matches, "matching that reference")}`;
+        } else text = "I do not have that story reference. Ask for an update or name the story.";
+        setAgentReply(text);
+        setVoiceHint(text);
+        void speakText(text);
+        return;
+      }
+    }
     const catalogue = parseCatalogueCommand(raw);
     if (catalogue) {
       stopNarration();
@@ -667,13 +707,7 @@ export default function Home() {
         if (!target) {
           text = `There isn't a story numbered ${catalogue.index} in this list.`;
         } else {
-          if (!visibleStories.some(story => story.id === target.id)) {
-            if (isHomePublicationDate(target.publicationDate, anchorTime)) {
-              setDismissed(current => current.filter(id => id !== target.id));
-              changeTab("home");
-            } else changeTab("history");
-          }
-          setSelectedId(target.id);
+          openSavedStory(target);
           text = `Opening story ${catalogue.index}: ${target.title}.`;
           if (catalogue.read) {
             setAgentReply(text);
@@ -695,6 +729,7 @@ export default function Home() {
         const page = Math.min(lastPage, Math.max(0, paging
           ? previous.page + (catalogue.page === "next" ? 1 : -1) : 0));
         catalogueRef.current = { stories: [...source], label, page };
+        if (!catalogue.countOnly) storyReferencesRef.current = source.slice(page * CATALOGUE_PAGE_SIZE, (page + 1) * CATALOGUE_PAGE_SIZE);
         text = catalogueText(source, label, page, catalogue.countOnly);
       }
       setAgentReply(text);
