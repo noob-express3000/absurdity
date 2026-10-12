@@ -114,7 +114,6 @@ GitHub Actions runs the Daily research workflow once per day at:
 
 ```text
 03:17 UTC
-05:17 South Africa
 ```
 
 The workflow does not run a second copy of the backend. It simply calls the production Render `/api/research` endpoint and polls the returned run until it finishes.
