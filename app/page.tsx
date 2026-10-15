@@ -162,7 +162,7 @@ export default function Home() {
       if (signal?.aborted) return [];
       if (!["live", "demo"].includes(payload?.mode) || !Array.isArray(payload?.stories) ||
           !payload.stories.every(isReaderStory) ||
-          !(payload.nextCursor === null || typeof payload.nextCursor === "string")) {
+          !(payload.nextCursor === undefined || payload.nextCursor === null || typeof payload.nextCursor === "string")) {
         throw new Error("Invalid archive page.");
       }
       archiveLoadedRef.current = true;
@@ -177,8 +177,8 @@ export default function Home() {
         setSelectedId(current => demoBriefing.stories.some(story => story.id === current)
           ? current : demoBriefing.stories[0].id);
       }
-      archiveCursorsRef.current[scope] = payload.nextCursor;
-      setArchiveCursors(current => ({ ...current, [scope]: payload.nextCursor }));
+      archiveCursorsRef.current[scope] = payload.nextCursor ?? null;
+      setArchiveCursors(current => ({ ...current, [scope]: payload.nextCursor ?? null }));
       return payload.stories as Story[];
     } finally {
       pagingInFlightRef.current[scope] = false;
