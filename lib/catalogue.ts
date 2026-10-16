@@ -15,7 +15,7 @@ export function parseCatalogueCommand(raw: string): CatalogueCommand | null {
   const select = text.match(/^(?:(open|select|read|play|show|go to|tell me about)\s+)?(?:the\s+)?(?:story\s+)?(?:number\s+)?(\d+|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)(?:st|nd|rd|th)?(?:\s+(?:story|one))?(?:\s+and\s+read(?:\s+it)?)?$/);
   if (select) {
     const index = /^\d+$/.test(select[2]) ? Number(select[2]) : ordinals.indexOf(select[2]) + 1;
-    if (Number.isSafeInteger(index) && index >= 1 && index <= 500) {
+    if (Number.isSafeInteger(index) && index >= 1 && index <= Number.MAX_SAFE_INTEGER) {
       return { action: "select", index, read: /\b(?:read|play)\b/.test(text) };
     }
   }
@@ -35,12 +35,12 @@ export function parseCatalogueCommand(raw: string): CatalogueCommand | null {
   return { action: "list", scope, page: 0, countOnly: count.test(text) };
 }
 
-export function catalogueText(stories: Story[], label: string, page = 0, countOnly = false) {
-  const count = stories.length;
+export function catalogueText(stories: Story[], label: string, page = 0, countOnly = false, totalCount = stories.length) {
+  const count = totalCount;
   if (!count) return `There are no stories ${label}.`;
   const start = Math.min(Math.max(0, page) * CATALOGUE_PAGE_SIZE,
-    Math.floor((count - 1) / CATALOGUE_PAGE_SIZE) * CATALOGUE_PAGE_SIZE);
-  const prefix = `There ${count === 1 ? "is" : "are"} ${count}${count === 500 ? " or more" : ""} ${count === 1 ? "story" : "stories"} ${label}.`;
+    Math.max(0, Math.floor((stories.length - 1) / CATALOGUE_PAGE_SIZE) * CATALOGUE_PAGE_SIZE));
+  const prefix = `There ${count === 1 ? "is" : "are"} ${count} ${count === 1 ? "story" : "stories"} ${label}.`;
   if (countOnly) return prefix;
   const titles = stories.slice(start, start + CATALOGUE_PAGE_SIZE)
     .map((story, index) => `${start + index + 1}. ${story.title}`).join("\n");

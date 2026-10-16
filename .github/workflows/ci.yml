@@ -52,6 +52,15 @@ jobs:
           curl --silent --fail "http://127.0.0.1:3000/api/stories?scope=home" > /tmp/home-stories.json
           node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("/tmp/home-stories.json","utf8")); if(x.mode!=="demo" || !Array.isArray(x.stories) || x.stories.length===0) process.exit(1);'
 
+          if ! curl --silent --show-error --fail "http://127.0.0.1:3000/api/stories?scope=home&paged=1&limit=2&count=1" > /tmp/archive-page1.json; then
+            cat /tmp/absurdity-next.log
+            exit 1
+          fi
+          node -e 'const x=require("/tmp/archive-page1.json"); if(x.mode!=="demo"||x.stories.length!==2||x.total<3||!x.nextCursor) process.exit(1);'
+          CURSOR=$(node -e 'process.stdout.write(require("/tmp/archive-page1.json").nextCursor)')
+          curl --silent --fail "http://127.0.0.1:3000/api/stories?scope=home&paged=1&limit=2&cursor=$CURSOR" > /tmp/archive-page2.json
+          node -e 'const a=require("/tmp/archive-page1.json"); const b=require("/tmp/archive-page2.json"); if(!b.stories.length||b.stories.some(y=>a.stories.some(x=>x.id===y.id))) process.exit(1);'
+
           curl --silent --fail \
             -X POST http://127.0.0.1:3000/api/chat \
             -H "Content-Type: application/json" \

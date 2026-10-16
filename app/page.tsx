@@ -19,6 +19,17 @@ type VoiceState = "idle" | "loading" | "playing";
 const FAVORITES_KEY = "absurdity:favorites:v1";
 const DISMISSED_KEY = "absurdity:dismissed:v1";
 const ARCHIVE_REFRESH_MS = 5 * 60 * 1000;
+const ARCHIVE_PAGE_SIZE = 80;
+type ArchiveScope = "home" | "history";
+
+// Keep one canonical copy of each story while progressively loading archive pages.
+function mergeArchivedStories(previous: Story[], incoming: Story[]) {
+  const byId = new Map(previous.map(story => [story.id, story]));
+  for (const story of incoming) byId.set(story.id, story);
+  return [...byId.values()].sort((a, b) =>
+    b.publicationDate.localeCompare(a.publicationDate) || a.rank - b.rank || a.id.localeCompare(b.id));
+}
+
 
 function releaseRecognition(recognition: any) {
   if (!recognition) return;
@@ -68,6 +79,17 @@ function demoClock() {
 
 export default function Home() {
   const [remoteStories, setRemoteStories] = useState<Story[] | null>(null);
+  // undefined: not requested yet; null: finished; string: next cursor.
+  const [archiveCursors, setArchiveCursors] = useState<Record<ArchiveScope, string | null | undefined>>({
+    home: undefined, history: undefined,
+  });
+  const archiveCursorsRef = useRef<Record<ArchiveScope, string | null | undefined>>({
+    home: undefined, history: undefined,
+  });
+  const pagingInFlightRef = useRef<Record<ArchiveScope, boolean>>({ home: false, history: false });
+  const [pagingLoading, setPagingLoading] = useState<Record<ArchiveScope, boolean>>({ home: false, history: false });
+  const [pagingError, setPagingError] = useState("");
+  const requestedFavoritesRef = useRef(new Set<string>());
   const [dataMode, setDataMode] = useState<"loading" | "demo" | "live">("loading");
   const [archiveError, setArchiveError] = useState("");
   const stories = dataMode === "demo" ? demoBriefing.stories : remoteStories ?? [];
@@ -111,7 +133,10 @@ export default function Home() {
   const agentRequestRef = useRef(0);
   const agentControllerRef = useRef<AbortController | null>(null);
   const conversationRef = useRef<ConversationTurn[]>([]);
-  const catalogueRef = useRef<{ stories: Story[]; label: string; page: number } | null>(null);
+  const catalogueRef = useRef<{
+    stories: Story[]; label: string; page: number;
+    remoteScope?: "home" | "history" | "all"; nextCursor?: string | null; total?: number;
+  } | null>(null);
   const storyReferencesRef = useRef<Story[]>([]);
   const speechActiveRef = useRef(false);
   const recognitionStateRef = useRef<"idle" | "running" | "stopping">("idle");
@@ -124,48 +149,89 @@ export default function Home() {
     setHydrated(true);
   }, []);
 
-  const reloadArchive = useCallback(async (signal?: AbortSignal, surfaceErrors = true) => {
-    const requestId = ++archiveRequestRef.current;
+  const loadArchivePage = useCallback(async (scope: ArchiveScope, reset = false, signal?: AbortSignal): Promise<Story[]> => {
+    if (pagingInFlightRef.current[scope]) return [];
+    const cursor = reset ? undefined : archiveCursorsRef.current[scope];
+    if (!reset && cursor === null) return [];
+    pagingInFlightRef.current[scope] = true;
+    setPagingLoading(current => ({ ...current, [scope]: true }));
     try {
-      const payload = await readerRequest("/api/stories?scope=all&limit=500", {
-        cache: "no-store", signal,
-      }, async response => {
-        if (!response.ok) throw new Error("Could not refresh stories.");
+      const url = `/api/stories?scope=${scope}&paged=1&limit=${ARCHIVE_PAGE_SIZE}` +
+        (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "");
+      const payload = await readerRequest(url, { cache: "no-store", signal }, async response => {
+        if (!response.ok) throw new Error("Could not load archived stories.");
         return response.json();
       }, 20000);
-      if (signal?.aborted || requestId !== archiveRequestRef.current) return;
-      if (!["live", "demo"].includes(payload?.mode) || !Array.isArray(payload?.stories) || !payload.stories.every(isReaderStory)) {
-        throw new Error("Invalid archive response.");
+      if (signal?.aborted) return [];
+      if (!["live", "demo"].includes(payload?.mode) || !Array.isArray(payload?.stories) ||
+          !payload.stories.every(isReaderStory) ||
+          !(payload.nextCursor === undefined || payload.nextCursor === null || typeof payload.nextCursor === "string")) {
+        throw new Error("Invalid archive page.");
       }
       archiveLoadedRef.current = true;
       setArchiveError("");
-      const mode = payload.mode;
-      if (mode === "live") {
+      setPagingError("");
+      if (payload.mode === "live") {
         setDataMode("live");
-        if (payload.stories.length) {
-          setRemoteStories(payload.stories as Story[]);
-        } else {
-          // An empty persistent archive is genuinely empty. Never replace it with
-          // seeded fixtures in live mode.
-          setRemoteStories([]);
-        }
-      } else if (mode === "demo") {
+        setRemoteStories(current => mergeArchivedStories(current ?? [], payload.stories as Story[]));
+      } else {
         setDataMode("demo");
         setRemoteStories(null);
-        setSelectedId(current =>
-          demoBriefing.stories.some(story => story.id === current) ? current : demoBriefing.stories[0].id);
+        setSelectedId(current => demoBriefing.stories.some(story => story.id === current)
+          ? current : demoBriefing.stories[0].id);
       }
-    } catch (error) {
+      archiveCursorsRef.current[scope] = payload.nextCursor ?? null;
+      setArchiveCursors(current => ({ ...current, [scope]: payload.nextCursor ?? null }));
+      return payload.stories as Story[];
+    } finally {
+      pagingInFlightRef.current[scope] = false;
+      setPagingLoading(current => ({ ...current, [scope]: false }));
+    }
+  }, []);
+
+  const reloadArchive = useCallback(async (signal?: AbortSignal, surfaceErrors = true) => {
+    const requestId = ++archiveRequestRef.current;
+    try {
+      await loadArchivePage("home", true, signal);
+    } catch {
       if (signal?.aborted || requestId !== archiveRequestRef.current) return;
-      // Passive refreshes are stale-while-revalidate: once a valid archive has
-      // loaded, a transient Render/Turso/network failure must not interrupt reading
-      // or throw a large error banner over cached stories.
       if (surfaceErrors || !archiveLoadedRef.current) {
         setArchiveError("Couldn't load the story archive. Try again.");
       }
-      throw error;
+      throw new Error("Could not refresh the story archive.");
     }
-  }, []);
+  }, [loadArchivePage]);
+
+  // History starts with the newest archived page and extends only as readers browse.
+  useEffect(() => {
+    if (dataMode !== "live" || tab !== "history" || archiveCursors.history !== undefined) return;
+    void loadArchivePage("history").catch(() => setPagingError("Couldn't load older stories. Try again."));
+  }, [archiveCursors.history, dataMode, loadArchivePage, tab]);
+
+  // Browser favorites can point far beyond the pages currently loaded.
+  useEffect(() => {
+    if (!hydrated || dataMode !== "live" || tab !== "favorites") return;
+    const loaded = new Set((remoteStories ?? []).map(story => story.id));
+    const missing = favorites.filter(id => !loaded.has(id) && !requestedFavoritesRef.current.has(id));
+    if (!missing.length) return;
+    for (let i = 0; i < missing.length; i += 20) {
+      const ids = missing.slice(i, i + 20);
+      ids.forEach(id => requestedFavoritesRef.current.add(id));
+      void readerRequest(`/api/stories?ids=${encodeURIComponent(ids.join(","))}`,
+        { cache: "no-store" }, async response => {
+          if (!response.ok) throw new Error("Could not load favorite stories.");
+          return response.json();
+        }, 20000).then(payload => {
+          if (!Array.isArray(payload?.stories) || !payload.stories.every(isReaderStory)) {
+            throw new Error("Invalid favorite stories.");
+          }
+          setRemoteStories(current => mergeArchivedStories(current ?? [], payload.stories));
+        }).catch(() => {
+          ids.forEach(id => requestedFavoritesRef.current.delete(id));
+          setPagingError("Couldn't load older favorites. Reopen Favorites to retry.");
+        });
+    }
+  }, [dataMode, favorites, hydrated, tab]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -543,6 +609,16 @@ export default function Home() {
     if (!visibleStories.length) return;
     const currentIndex = visibleStories.findIndex((story) => story.id === selectedId);
     const safeIndex = currentIndex < 0 ? 0 : currentIndex;
+    if (direction === 1 && safeIndex === visibleStories.length - 1 &&
+        !searchResults && tab !== "favorites" && dataMode === "live" &&
+        archiveCursorsRef.current[tab] != null) {
+      const seen = new Set(visibleStories.map(story => story.id));
+      void loadArchivePage(tab).then(batch => {
+        const next = batch.find(story => !seen.has(story.id));
+        if (next) { setSelectedId(next.id); stopNarration(); }
+      }).catch(() => setPagingError("Couldn't load the next stories. Try again."));
+      return;
+    }
     const nextIndex = (safeIndex + direction + visibleStories.length) % visibleStories.length;
     setSelectedId(visibleStories[nextIndex].id);
     stopNarration();
@@ -682,6 +758,94 @@ export default function Home() {
     }
   }
 
+  async function extendRemoteCatalogue(
+    snapshot: NonNullable<typeof catalogueRef.current>, targetLength: number,
+  ) {
+    if (!snapshot.remoteScope) return snapshot;
+    while (snapshot.stories.length < targetLength && snapshot.nextCursor !== null) {
+      const url = `/api/stories?scope=${snapshot.remoteScope}&paged=1&limit=${ARCHIVE_PAGE_SIZE}` +
+        (snapshot.nextCursor ? `&cursor=${encodeURIComponent(snapshot.nextCursor)}` : "&count=1");
+      const payload = await readerRequest(url, { cache: "no-store" }, async response => {
+        if (!response.ok) throw new Error("Could not list archived stories.");
+        return response.json();
+      }, 20000);
+      if (!Array.isArray(payload?.stories) || !payload.stories.every(isReaderStory) ||
+          !(payload.nextCursor === null || typeof payload.nextCursor === "string")) {
+        throw new Error("Invalid archive catalogue.");
+      }
+      snapshot = {
+        ...snapshot,
+        stories: mergeArchivedStories(snapshot.stories, payload.stories),
+        nextCursor: payload.nextCursor,
+        total: typeof payload.total === "number" ? payload.total : snapshot.total,
+      };
+      setRemoteStories(current => mergeArchivedStories(current ?? [], payload.stories));
+    }
+    return snapshot;
+  }
+
+  async function listRemoteCatalogue(command: Extract<NonNullable<ReturnType<typeof parseCatalogueCommand>>, { action: "list" }>) {
+    try {
+      const previous = catalogueRef.current;
+      const paging = typeof command.page === "string" && Boolean(previous?.remoteScope);
+      const remoteScope = paging ? previous!.remoteScope! :
+        command.scope === "current" ? (tab === "favorites" ? "all" : tab) :
+        command.scope as "home" | "history" | "all";
+      const label = paging ? previous!.label :
+        remoteScope === "all" ? "in the saved archive" : `in ${remoteScope}`;
+      let snapshot = paging ? { ...previous! } : {
+        stories: [] as Story[], label, page: 0, remoteScope,
+        nextCursor: undefined as string | null | undefined, total: undefined as number | undefined,
+      };
+      const wantedPage = paging
+        ? Math.max(0, previous!.page + (command.page === "next" ? 1 : -1))
+        : 0;
+      snapshot = await extendRemoteCatalogue(snapshot, (wantedPage + 1) * CATALOGUE_PAGE_SIZE);
+      const page = Math.min(wantedPage,
+        Math.max(0, Math.ceil(snapshot.stories.length / CATALOGUE_PAGE_SIZE) - 1));
+      snapshot.page = page;
+      catalogueRef.current = snapshot;
+      if (!command.countOnly) storyReferencesRef.current = snapshot.stories.slice(
+        page * CATALOGUE_PAGE_SIZE, (page + 1) * CATALOGUE_PAGE_SIZE);
+      const text = catalogueText(snapshot.stories, snapshot.label, page,
+        command.countOnly, snapshot.total ?? snapshot.stories.length);
+      setAgentReply(text);
+      setVoiceHint(text);
+      conversationRef.current = [...conversationRef.current, { role: "user", content: "List stories" },
+        { role: "assistant", content: text }].slice(-8) as ConversationTurn[];
+      void speakText(text);
+    } catch {
+      const text = "Couldn't load the story catalogue. Try again.";
+      setAgentReply(text);
+      setVoiceHint(text);
+    }
+  }
+
+  async function selectRemoteCatalogue(index: number, read: boolean) {
+    try {
+      let snapshot = catalogueRef.current;
+      if (!snapshot?.remoteScope) return;
+      if (snapshot.total !== undefined && index > snapshot.total) {
+        setAgentReply(`There isn't a story numbered ${index} in this list.`);
+        return;
+      }
+      snapshot = await extendRemoteCatalogue(snapshot, index);
+      catalogueRef.current = snapshot;
+      const target = snapshot.stories[index - 1];
+      if (!target) {
+        setAgentReply(`There isn't a story numbered ${index} in this list.`);
+        return;
+      }
+      openSavedStory(target);
+      const text = `Opening story ${index}: ${target.title}.`;
+      setAgentReply(text);
+      setVoiceHint(text);
+      if (read) void speakText(`${target.title}. ${target.detailedSummary}`, target.id);
+    } catch {
+      setAgentReply("Couldn't open that archived story. Try again.");
+    }
+  }
+
   function handleVoiceCommand(raw: string) {
     const reference = parseStoryReference(raw);
     if (reference && dataMode !== "loading") {
@@ -718,6 +882,20 @@ export default function Home() {
       stopNarration();
       if (dataMode === "loading") {
         setAgentReply("The archive is still loading. Try the list again once it opens.");
+        return;
+      }
+      if (dataMode === "live" && catalogue.action === "select" &&
+          catalogueRef.current?.remoteScope) {
+        void selectRemoteCatalogue(catalogue.index, catalogue.read);
+        return;
+      }
+      const effectiveScope = catalogue.action === "list"
+        ? catalogue.scope === "current" ? tab : catalogue.scope
+        : "current";
+      if (dataMode === "live" && catalogue.action === "list" && !searchResults &&
+          (effectiveScope === "all" || effectiveScope === "home" || effectiveScope === "history" ||
+            (typeof catalogue.page === "string" && Boolean(catalogueRef.current?.remoteScope)))) {
+        void listRemoteCatalogue(catalogue);
         return;
       }
       let text: string;
@@ -849,6 +1027,8 @@ export default function Home() {
   const emptyMessage =
     dataMode === "loading" ? "Loading stories…"
     : searchResults ? "No archived stories match this search and timeframe."
+    : tab === "history" && (archiveCursors.history === undefined || pagingLoading.history)
+      ? "Loading older stories…"
     : tab === "home"
       ? dismissed.length
         ? "You cleared the current feed. Restore dismissed stories to review it again."
@@ -919,7 +1099,15 @@ export default function Home() {
               storyBrowserRef.current?.focus();
             }
           }}>
-          <div id="story-list" ref={storyListRef} className="story-list abs-scrollbar">
+          <div id="story-list" ref={storyListRef} className="story-list abs-scrollbar"
+            onScroll={event => {
+              if (searchResults || dataMode !== "live" || tab === "favorites") return;
+              const element = event.currentTarget;
+              if (element.scrollHeight - element.scrollTop - element.clientHeight < 160 &&
+                  archiveCursorsRef.current[tab] != null && !pagingInFlightRef.current[tab]) {
+                void loadArchivePage(tab).catch(() => setPagingError("Couldn't load more stories. Try again."));
+              }
+            }}>
             {visibleStories.length ? visibleStories.map((story) => (
               <div key={story.id} className={`story-row ${selected.id === story.id ? "is-selected" : ""}`}
                 onPointerDown={(event) => onStoryPointerDown(story.id, event)} onPointerUp={(event) => onStoryPointerUp(story.id, event)}>
@@ -941,6 +1129,13 @@ export default function Home() {
                 </div>
               </div>
             )) : <p className="empty-state">{emptyMessage}</p>}
+            {!searchResults && dataMode === "live" && tab !== "favorites" &&
+              archiveCursors[tab] != null && <button className="load-more-stories"
+                onClick={() => void loadArchivePage(tab).catch(() => setPagingError("Couldn't load more stories. Try again."))}
+                disabled={pagingLoading[tab]}>
+                {pagingLoading[tab] ? "Loading…" : "Load more stories"}
+              </button>}
+            {pagingError && <p className="archive-page-error" role="alert">{pagingError}</p>}
           </div>
           <div className="list-navigation">
             <button ref={storyBrowserRef} className="browse-stories" onClick={() => {
@@ -949,7 +1144,7 @@ export default function Home() {
             }}
               aria-label={storyBrowserOpen ? "Close story list" : "Browse stories"} aria-expanded={storyBrowserOpen} aria-controls="story-list">
               <span>Stories</span>
-              <span className="story-position">{visibleStories.length ? visibleStories.findIndex(story => story.id === selected.id) + 1 : 0} / {visibleStories.length}</span>
+              <span className="story-position">{visibleStories.length ? visibleStories.findIndex(story => story.id === selected.id) + 1 : 0} / {visibleStories.length}{!searchResults && tab !== "favorites" && archiveCursors[tab] ? "+" : ""}</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={storyBrowserOpen ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"}/></svg>
             </button>
             {tab === "home" && dismissed.length > 0 && <button className="restore-action" onClick={restoreDismissed} aria-label={`Restore dismissed (${dismissed.length})`}>Restore</button>}

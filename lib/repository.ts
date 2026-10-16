@@ -3,6 +3,7 @@ import { getDatabase, type SqlStatement } from "./database";
 import { demoBriefing } from "./demo-data";
 import type { Briefing, ResearchStep, Story, StorySource, IngestedEvidence } from "./types";
 import { HOME_WINDOW_DAYS, homeCutoffIso, isHomePublicationDate } from "./story-lifecycle";
+import { archivePositionIsAfter, encodeArchiveCursor, type ArchivePosition } from "./archive-pagination";
 
 export interface StoryRepository {
   getCurrentBriefing(): Promise<Briefing>;
@@ -11,6 +12,11 @@ export interface StoryRepository {
 }
 
 export type ArchiveDates = { from?: string; before?: string };
+export type ArchivePage = { stories: Story[]; nextCursor: string | null };
+
+function archivePosition(row: { publication_date: string; rank: number; id: string }): ArchivePosition {
+  return { publicationDate: row.publication_date, rank: Number(row.rank), id: row.id };
+}
 
 export type ResearchRunRecord = {
   id?: string;
@@ -152,6 +158,22 @@ export class DemoStoryRepository implements StoryRepository {
 
     return matches.slice(0, limit);
   }
+
+  async pageStories(query: string, limit: number, dates: ArchiveDates, cursor: ArchivePosition | null): Promise<ArchivePage> {
+    const matches = (await this.searchStories(query, demoBriefing.stories.length, dates))
+      .sort((a, b) => Date.parse(b.publicationDate) - Date.parse(a.publicationDate) || a.rank - b.rank || a.id.localeCompare(b.id))
+      .filter(story => !cursor || archivePositionIsAfter({
+        publicationDate: new Date(story.publicationDate).toISOString(), rank: story.rank, id: story.id,
+      }, cursor));
+    const page = matches.slice(0, limit);
+    const last = page[page.length - 1];
+    return { stories: page, nextCursor: matches.length > limit && last
+      ? encodeArchiveCursor({ publicationDate: new Date(last.publicationDate).toISOString(), rank: last.rank, id: last.id }) : null };
+  }
+
+  async storiesByIds(ids: string[]) {
+    return demoBriefing.stories.filter(story => ids.includes(story.id));
+  }
 }
 
 export class PersistentStoryRepository implements StoryRepository {
@@ -258,6 +280,41 @@ export class PersistentStoryRepository implements StoryRepository {
       [...args, safeLimit],
     );
 
+    return this.hydrateMany(rows);
+  }
+
+  async pageStories(query: string, limit: number, dates: ArchiveDates, cursor: ArchivePosition | null): Promise<ArchivePage> {
+    const database = await getDatabase();
+    const clauses = ["status = 'selected'"];
+    const args: (string | number)[] = [];
+    for (const term of query.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+      clauses.push("LOWER(title || ' ' || summary || ' ' || category || ' ' || country || ' ' || region || ' ' || tags_json) LIKE ? ESCAPE '\\'");
+      args.push("%" + term.replace(/[\\%_]/g, "\\  async upsertStory(story: Story) {") + "%");
+    }
+    if (dates.from) { clauses.push("publication_date >= ?"); args.push(dates.from); }
+    if (dates.before) { clauses.push("publication_date < ?"); args.push(dates.before); }
+    if (cursor) {
+      clauses.push("(publication_date < ? OR (publication_date = ? AND rank > ?) OR (publication_date = ? AND rank = ? AND id > ?))");
+      args.push(cursor.publicationDate, cursor.publicationDate, cursor.rank, cursor.publicationDate, cursor.rank, cursor.id);
+    }
+    const rows = await database.query<StoryRow>(
+      `SELECT * FROM stories WHERE ${clauses.join(" AND ")} ORDER BY publication_date DESC, rank ASC, id ASC LIMIT ?`,
+      [...args, limit + 1],
+    );
+    const last = rows[Math.min(rows.length, limit) - 1];
+    return {
+      stories: await this.hydrateMany(rows.slice(0, limit)),
+      nextCursor: rows.length > limit && last ? encodeArchiveCursor(archivePosition(last)) : null,
+    };
+  }
+
+  async storiesByIds(ids: string[]) {
+    if (!ids.length) return [];
+    const database = await getDatabase();
+    const rows = await database.query<StoryRow>(
+      `SELECT * FROM stories WHERE status = 'selected' AND id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
     return this.hydrateMany(rows);
   }
 
@@ -433,6 +490,37 @@ export async function getLatestResearchRun() {
 
 const demoStoryRepository = new DemoStoryRepository();
 const persistentStoryRepository = new PersistentStoryRepository();
+
+export async function pageSavedStories(query: string, limit: number, dates: ArchiveDates, cursor: ArchivePosition | null) {
+  return process.env.ABSURDITY_MODE === "demo"
+    ? demoStoryRepository.pageStories(query, limit, dates, cursor)
+    : persistentStoryRepository.pageStories(query, limit, dates, cursor);
+}
+
+export async function countSavedStories(query: string, dates: ArchiveDates): Promise<number> {
+  if (process.env.ABSURDITY_MODE === "demo") {
+    return (await demoStoryRepository.searchStories(query, demoBriefing.stories.length, dates)).length;
+  }
+  const database = await getDatabase();
+  const clauses = ["status = 'selected'"];
+  const args: (string | number)[] = [];
+  for (const term of query.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+    clauses.push("LOWER(title || ' ' || summary || ' ' || category || ' ' || country || ' ' || region || ' ' || tags_json) LIKE ? ESCAPE '\\\\'");
+    args.push("%" + term.replace(/[\\%_]/g, "\\export async function getSavedStoriesByIds(ids: string[]) {") + "%");
+  }
+  if (dates.from) { clauses.push("publication_date >= ?"); args.push(dates.from); }
+  if (dates.before) { clauses.push("publication_date < ?"); args.push(dates.before); }
+  const result = await database.query<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM stories WHERE ${clauses.join(" AND ")}`, args,
+  );
+  return Number(result[0]?.total ?? 0);
+}
+
+export async function getSavedStoriesByIds(ids: string[]) {
+  return process.env.ABSURDITY_MODE === "demo"
+    ? demoStoryRepository.storiesByIds(ids)
+    : persistentStoryRepository.storiesByIds(ids);
+}
 
 function activeStoryRepository(): StoryRepository {
   return process.env.ABSURDITY_MODE === "demo"

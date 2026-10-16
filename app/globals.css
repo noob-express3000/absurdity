@@ -293,6 +293,26 @@ button {
   padding: 10px 8px 8px;
 }
 
+.load-more-stories {
+  display: block;
+  width: calc(100% - 16px);
+  min-height: 38px;
+  margin: 14px 8px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 560;
+}
+.load-more-stories:hover:not(:disabled) { background: var(--soft); }
+.archive-page-error {
+  margin: 10px 14px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .story-row {
   position: relative;
   display: flex;
