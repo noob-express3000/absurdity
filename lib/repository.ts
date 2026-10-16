@@ -161,14 +161,14 @@ export class DemoStoryRepository implements StoryRepository {
 
   async pageStories(query: string, limit: number, dates: ArchiveDates, cursor: ArchivePosition | null): Promise<ArchivePage> {
     const matches = (await this.searchStories(query, demoBriefing.stories.length, dates))
-      .sort((a, b) => b.publicationDate.localeCompare(a.publicationDate) || a.rank - b.rank || a.id.localeCompare(b.id))
+      .sort((a, b) => Date.parse(b.publicationDate) - Date.parse(a.publicationDate) || a.rank - b.rank || a.id.localeCompare(b.id))
       .filter(story => !cursor || archivePositionIsAfter({
-        publicationDate: story.publicationDate, rank: story.rank, id: story.id,
+        publicationDate: new Date(story.publicationDate).toISOString(), rank: story.rank, id: story.id,
       }, cursor));
     const page = matches.slice(0, limit);
     const last = page[page.length - 1];
     return { stories: page, nextCursor: matches.length > limit && last
-      ? encodeArchiveCursor({ publicationDate: last.publicationDate, rank: last.rank, id: last.id }) : null };
+      ? encodeArchiveCursor({ publicationDate: new Date(last.publicationDate).toISOString(), rank: last.rank, id: last.id }) : null };
   }
 
   async storiesByIds(ids: string[]) {
