@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { storyRepository, pageSavedStories, getSavedStoriesByIds } from "@/lib/repository";
+import { storyRepository, pageSavedStories, getSavedStoriesByIds, countSavedStories } from "@/lib/repository";
 import { decodeArchiveCursor } from "@/lib/archive-pagination";
 import { demoBriefing } from "@/lib/demo-data";
 import { clampHistoryBefore, clampHomeFrom } from "@/lib/story-lifecycle";
@@ -56,6 +56,7 @@ export async function GET(request: Request) {
       return NextResponse.json({
         mode: process.env.ABSURDITY_MODE === "demo" ? "demo" : "live",
         ...page,
+        ...(url.searchParams.get("count") === "1" ? { total: await countSavedStories(query, dates) } : {}),
       });
     }
 
