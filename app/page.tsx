@@ -133,7 +133,10 @@ export default function Home() {
   const agentRequestRef = useRef(0);
   const agentControllerRef = useRef<AbortController | null>(null);
   const conversationRef = useRef<ConversationTurn[]>([]);
-  const catalogueRef = useRef<{ stories: Story[]; label: string; page: number } | null>(null);
+  const catalogueRef = useRef<{
+    stories: Story[]; label: string; page: number;
+    remoteScope?: "home" | "history" | "all"; nextCursor?: string | null; total?: number;
+  } | null>(null);
   const storyReferencesRef = useRef<Story[]>([]);
   const speechActiveRef = useRef(false);
   const recognitionStateRef = useRef<"idle" | "running" | "stopping">("idle");
@@ -755,6 +758,94 @@ export default function Home() {
     }
   }
 
+  async function extendRemoteCatalogue(
+    snapshot: NonNullable<typeof catalogueRef.current>, targetLength: number,
+  ) {
+    if (!snapshot.remoteScope) return snapshot;
+    while (snapshot.stories.length < targetLength && snapshot.nextCursor !== null) {
+      const url = `/api/stories?scope=${snapshot.remoteScope}&paged=1&limit=${ARCHIVE_PAGE_SIZE}` +
+        (snapshot.nextCursor ? `&cursor=${encodeURIComponent(snapshot.nextCursor)}` : "&count=1");
+      const payload = await readerRequest(url, { cache: "no-store" }, async response => {
+        if (!response.ok) throw new Error("Could not list archived stories.");
+        return response.json();
+      }, 20000);
+      if (!Array.isArray(payload?.stories) || !payload.stories.every(isReaderStory) ||
+          !(payload.nextCursor === null || typeof payload.nextCursor === "string")) {
+        throw new Error("Invalid archive catalogue.");
+      }
+      snapshot = {
+        ...snapshot,
+        stories: mergeArchivedStories(snapshot.stories, payload.stories),
+        nextCursor: payload.nextCursor,
+        total: typeof payload.total === "number" ? payload.total : snapshot.total,
+      };
+      setRemoteStories(current => mergeArchivedStories(current ?? [], payload.stories));
+    }
+    return snapshot;
+  }
+
+  async function listRemoteCatalogue(command: Extract<NonNullable<ReturnType<typeof parseCatalogueCommand>>, { action: "list" }>) {
+    try {
+      const previous = catalogueRef.current;
+      const paging = typeof command.page === "string" && Boolean(previous?.remoteScope);
+      const remoteScope = paging ? previous!.remoteScope! :
+        command.scope === "current" ? (tab === "favorites" ? "all" : tab) :
+        command.scope as "home" | "history" | "all";
+      const label = paging ? previous!.label :
+        remoteScope === "all" ? "in the saved archive" : `in ${remoteScope}`;
+      let snapshot = paging ? { ...previous! } : {
+        stories: [] as Story[], label, page: 0, remoteScope,
+        nextCursor: undefined as string | null | undefined, total: undefined as number | undefined,
+      };
+      const wantedPage = paging
+        ? Math.max(0, previous!.page + (command.page === "next" ? 1 : -1))
+        : 0;
+      snapshot = await extendRemoteCatalogue(snapshot, (wantedPage + 1) * CATALOGUE_PAGE_SIZE);
+      const page = Math.min(wantedPage,
+        Math.max(0, Math.ceil(snapshot.stories.length / CATALOGUE_PAGE_SIZE) - 1));
+      snapshot.page = page;
+      catalogueRef.current = snapshot;
+      if (!command.countOnly) storyReferencesRef.current = snapshot.stories.slice(
+        page * CATALOGUE_PAGE_SIZE, (page + 1) * CATALOGUE_PAGE_SIZE);
+      const text = catalogueText(snapshot.stories, snapshot.label, page,
+        command.countOnly, snapshot.total ?? snapshot.stories.length);
+      setAgentReply(text);
+      setVoiceHint(text);
+      conversationRef.current = [...conversationRef.current, { role: "user", content: "List stories" },
+        { role: "assistant", content: text }].slice(-8) as ConversationTurn[];
+      void speakText(text);
+    } catch {
+      const text = "Couldn't load the story catalogue. Try again.";
+      setAgentReply(text);
+      setVoiceHint(text);
+    }
+  }
+
+  async function selectRemoteCatalogue(index: number, read: boolean) {
+    try {
+      let snapshot = catalogueRef.current;
+      if (!snapshot?.remoteScope) return;
+      if (snapshot.total !== undefined && index > snapshot.total) {
+        setAgentReply(`There isn't a story numbered ${index} in this list.`);
+        return;
+      }
+      snapshot = await extendRemoteCatalogue(snapshot, index);
+      catalogueRef.current = snapshot;
+      const target = snapshot.stories[index - 1];
+      if (!target) {
+        setAgentReply(`There isn't a story numbered ${index} in this list.`);
+        return;
+      }
+      openSavedStory(target);
+      const text = `Opening story ${index}: ${target.title}.`;
+      setAgentReply(text);
+      setVoiceHint(text);
+      if (read) void speakText(`${target.title}. ${target.detailedSummary}`, target.id);
+    } catch {
+      setAgentReply("Couldn't open that archived story. Try again.");
+    }
+  }
+
   function handleVoiceCommand(raw: string) {
     const reference = parseStoryReference(raw);
     if (reference && dataMode !== "loading") {
@@ -791,6 +882,20 @@ export default function Home() {
       stopNarration();
       if (dataMode === "loading") {
         setAgentReply("The archive is still loading. Try the list again once it opens.");
+        return;
+      }
+      if (dataMode === "live" && catalogue.action === "select" &&
+          catalogueRef.current?.remoteScope) {
+        void selectRemoteCatalogue(catalogue.index, catalogue.read);
+        return;
+      }
+      const effectiveScope = catalogue.action === "list"
+        ? catalogue.scope === "current" ? tab : catalogue.scope
+        : "current";
+      if (dataMode === "live" && catalogue.action === "list" && !searchResults &&
+          (effectiveScope === "all" || effectiveScope === "home" || effectiveScope === "history" ||
+            (typeof catalogue.page === "string" && Boolean(catalogueRef.current?.remoteScope)))) {
+        void listRemoteCatalogue(catalogue);
         return;
       }
       let text: string;
