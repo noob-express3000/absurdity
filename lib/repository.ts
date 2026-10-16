@@ -497,6 +497,25 @@ export async function pageSavedStories(query: string, limit: number, dates: Arch
     : persistentStoryRepository.pageStories(query, limit, dates, cursor);
 }
 
+export async function countSavedStories(query: string, dates: ArchiveDates): Promise<number> {
+  if (process.env.ABSURDITY_MODE === "demo") {
+    return (await demoStoryRepository.searchStories(query, demoBriefing.stories.length, dates)).length;
+  }
+  const database = await getDatabase();
+  const clauses = ["status = 'selected'"];
+  const args: (string | number)[] = [];
+  for (const term of query.trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+    clauses.push("LOWER(title || ' ' || summary || ' ' || category || ' ' || country || ' ' || region || ' ' || tags_json) LIKE ? ESCAPE '\\\\'");
+    args.push("%" + term.replace(/[\\%_]/g, "\\export async function getSavedStoriesByIds(ids: string[]) {") + "%");
+  }
+  if (dates.from) { clauses.push("publication_date >= ?"); args.push(dates.from); }
+  if (dates.before) { clauses.push("publication_date < ?"); args.push(dates.before); }
+  const result = await database.query<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM stories WHERE ${clauses.join(" AND ")}`, args,
+  );
+  return Number(result[0]?.total ?? 0);
+}
+
 export async function getSavedStoriesByIds(ids: string[]) {
   return process.env.ABSURDITY_MODE === "demo"
     ? demoStoryRepository.storiesByIds(ids)
